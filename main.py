@@ -133,6 +133,7 @@ class MatrixDisplay:
         rgb_parallel: int | None = None,
         rgb_pixel_mapper: str = "",
         rgb_layout: str = "parallel-ports",
+        rgb_no_hardware_pulse: bool = False,
     ):
         self.width = width
         self.height = height
@@ -157,6 +158,7 @@ class MatrixDisplay:
             rgb_parallel,
             rgb_pixel_mapper,
             rgb_layout,
+            rgb_no_hardware_pulse,
         )
 
     def _init_driver(
@@ -178,6 +180,7 @@ class MatrixDisplay:
         rgb_parallel: int | None,
         rgb_pixel_mapper: str,
         rgb_layout: str,
+        rgb_no_hardware_pulse: bool,
     ):
         def _pick_enum(default_name: str, enum_obj, fallbacks: tuple[str, ...]):
             names = (default_name, *fallbacks)
@@ -232,6 +235,7 @@ class MatrixDisplay:
                 rgb_parallel,
                 rgb_pixel_mapper,
                 rgb_layout,
+                rgb_no_hardware_pulse,
             )
 
         try:
@@ -425,6 +429,7 @@ class MatrixDisplay:
                     rgb_parallel,
                     rgb_pixel_mapper,
                     rgb_layout,
+                    rgb_no_hardware_pulse,
                 )
             except Exception as exc:
                 errors.append(f"rgbmatrix.RGBMatrix: {exc}")
@@ -451,6 +456,7 @@ class MatrixDisplay:
         parallel_override: int | None,
         pixel_mapper: str,
         layout: str,
+        no_hardware_pulse: bool,
     ):
         from rgbmatrix import RGBMatrix, RGBMatrixOptions
 
@@ -500,6 +506,8 @@ class MatrixDisplay:
             options.row_address_type = int(row_addr_type)
         if pixel_mapper:
             options.pixel_mapper_config = pixel_mapper
+        if no_hardware_pulse:
+            options.disable_hardware_pulsing = True
 
         matrix = RGBMatrix(options=options)
         self.backend_name = "rgbmatrix.RGBMatrix"
@@ -787,6 +795,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--rgb-parallel", type=int, default=None, help="Override rpi-rgb-led-matrix parallel chain count")
     p.add_argument("--rgb-pixel-mapper", default="", help="rpi-rgb-led-matrix pixel mapper config, e.g. 'U-mapper;Rotate:90'")
     p.add_argument(
+        "--led-no-hardware-pulse",
+        "--rgb-no-hardware-pulse",
+        dest="rgb_no_hardware_pulse",
+        action="store_true",
+        help="Disable rpi-rgb-led-matrix hardware pulsing when snd_bcm2835 or other PWM users conflict (may increase flicker)",
+    )
+    p.add_argument(
         "--rgb-layout",
         choices=("parallel-ports", "daisy-chain"),
         default="parallel-ports",
@@ -820,7 +835,8 @@ def main() -> None:
         f"[scoreboard] geometry={width}x{height} panel={args.panel_width}x{args.panel_height} "
         f"backend={args.backend} scan={args.panel_scan} addr_lines={inferred_addr_lines} "
         f"serpentine={args.serpentine} pinout={args.pinout} "
-        f"rgb_layout={args.rgb_layout} rgb_multiplexing={args.rgb_multiplexing}"
+        f"rgb_layout={args.rgb_layout} rgb_multiplexing={args.rgb_multiplexing} "
+        f"rgb_no_hardware_pulse={args.rgb_no_hardware_pulse}"
     )
     print("[scoreboard] Default panel-scan is 1/8 for this repo. Use --panel-scan auto|1/16|1/32 or --addr-lines to match other panel types.")
     display = MatrixDisplay(
@@ -841,6 +857,7 @@ def main() -> None:
         args.rgb_parallel,
         args.rgb_pixel_mapper,
         args.rgb_layout,
+        args.rgb_no_hardware_pulse,
     )
     renderer = MatrixRenderer(display, state)
     if args.test_pattern == "panel":

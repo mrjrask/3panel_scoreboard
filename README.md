@@ -35,6 +35,14 @@ Run as a script:
 sudo -E env PATH="$PWD/.venv/bin:$PATH" python main.py --backend rgbmatrix
 ```
 
+If startup exits because the Pi sound module (`snd_bcm2835`) is loaded, either disable built-in Pi audio or add the `rpi-rgb-led-matrix` compatibility flag exposed by this app:
+
+```bash
+sudo -E env PATH="$PWD/.venv/bin:$PATH" python main.py --backend rgbmatrix --led-no-hardware-pulse
+```
+
+`--led-no-hardware-pulse` is also available as `--rgb-no-hardware-pulse`. It avoids the sound/PWM conflict, but may increase display flicker compared with disabling built-in audio.
+
 By default, the Pi 4 backend is tuned for this project's three-panel P5 1/8-scan setup: one 64x32 panel per Triple Bonnet port using the Triple Bonnet/Active-3-compatible `regular` GPIO mapping. The app renders a logical 192x32 scoreboard, then remaps each 64x32 third of that image onto the three `rpi-rgb-led-matrix` parallel outputs. The effective default `rgbmatrix` topology is:
 
 ```bash

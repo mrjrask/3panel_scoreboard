@@ -38,6 +38,9 @@ Install complete for Raspberry Pi 4 / rpi-rgb-led-matrix.
 Run as script:
   sudo -E env PATH="$VENV_DIR/bin:\$PATH" python "$REPO_DIR/main.py" --backend rgbmatrix
 
+If startup reports that snd_bcm2835 is loaded, disable built-in Pi audio or use:
+  sudo -E env PATH="$VENV_DIR/bin:\$PATH" python "$REPO_DIR/main.py" --backend rgbmatrix --led-no-hardware-pulse
+
 Install service:
   sudo cp "$REPO_DIR/systemd/scoreboard.service" /etc/systemd/system/scoreboard.service
   sudo systemctl daemon-reload

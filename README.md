@@ -35,18 +35,18 @@ Run as a script:
 sudo -E env PATH="$PWD/.venv/bin:$PATH" python main.py --backend rgbmatrix
 ```
 
-By default, the Pi 4 backend is tuned for this project's three-panel P5 1/8-scan setup: one 64x32 panel per Triple Bonnet port. The app renders a logical 192x32 scoreboard, then remaps each 64x32 third of that image onto the three `rpi-rgb-led-matrix` parallel outputs. The effective default `rgbmatrix` topology is:
+By default, the Pi 4 backend is tuned for this project's three-panel P5 1/8-scan setup: one 64x32 panel per Triple Bonnet port using the Triple Bonnet/Active-3-compatible `regular` GPIO mapping. The app renders a logical 192x32 scoreboard, then remaps each 64x32 third of that image onto the three `rpi-rgb-led-matrix` parallel outputs. The effective default `rgbmatrix` topology is:
 
 ```bash
 python main.py --backend rgbmatrix \
   --rgb-layout parallel-ports \
-  --rgb-gpio-mapping adafruit-hat \
+  --rgb-gpio-mapping regular \
   --rgb-slowdown-gpio 2 \
   --rgb-multiplexing 1 \
   --rgb-row-addr-type 0
 ```
 
-That creates the equivalent of `--rgb-parallel 3 --rgb-chain-length 1` automatically for the default `--chain-across 3 --chain-down 1` geometry. If you instead daisy-chain panels from one HUB75 output, use:
+That creates the equivalent of `--rgb-parallel 3 --rgb-chain-length 1` automatically for the default `--chain-across 3 --chain-down 1` geometry. Do not use `--rgb-gpio-mapping adafruit-hat` for this three-output mode; the single-output Adafruit HAT/Bonnet mapping only supports `--rgb-parallel 1`. If you instead daisy-chain panels from one HUB75 output, use:
 
 ```bash
 python main.py --backend rgbmatrix --rgb-layout daisy-chain --rgb-parallel 1 --rgb-chain-length 3

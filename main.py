@@ -125,7 +125,7 @@ class MatrixDisplay:
         serpentine: bool = False,
         pinout_hint: str = "auto",
         backend: str = "auto",
-        rgb_gpio_mapping: str = "adafruit-hat",
+        rgb_gpio_mapping: str = "regular",
         rgb_slowdown_gpio: int = 2,
         rgb_multiplexing: int = 1,
         rgb_row_addr_type: int = 0,
@@ -469,6 +469,17 @@ class MatrixDisplay:
             rows = max(1, height // parallel)
             cols = max(1, width // chain_length)
 
+        if gpio_mapping in {"adafruit-hat", "adafruit-hat-pwm"} and parallel > 1:
+            raise ValueError(
+                f"--rgb-gpio-mapping {gpio_mapping!r} only supports one rpi-rgb-led-matrix "
+                f"parallel chain, but this geometry/layout requires {parallel}. "
+                "For the Adafruit Triple LED Matrix Bonnet's three HUB75 outputs, "
+                "use the Active-3-compatible default: --rgb-gpio-mapping regular. "
+                "If using a single-output Adafruit HAT/Bonnet, either daisy-chain panels "
+                "with --rgb-layout daisy-chain --rgb-parallel 1 --rgb-chain-length 3, or "
+                "set --chain-across/--chain-down for a single output."
+            )
+
         if layout == "parallel-ports" and chain_length == 1 and parallel == panel_count:
             canvas_width = cols * chain_length
             canvas_height = rows * parallel
@@ -764,7 +775,11 @@ def parse_args() -> argparse.Namespace:
         default="auto",
         help="Force low-level _piomatter pinout selection for diagnostics (default: auto)",
     )
-    p.add_argument("--rgb-gpio-mapping", default="adafruit-hat", help="rpi-rgb-led-matrix GPIO mapping for Pi 4 installs")
+    p.add_argument(
+        "--rgb-gpio-mapping",
+        default="regular",
+        help="rpi-rgb-led-matrix GPIO mapping for Pi 4 installs (default: regular / Active-3 pinout for Triple Bonnet parallel outputs)",
+    )
     p.add_argument("--rgb-slowdown-gpio", type=int, default=2, help="rpi-rgb-led-matrix GPIO slowdown value")
     p.add_argument("--rgb-multiplexing", type=int, default=1, help="rpi-rgb-led-matrix multiplexing mode (default: 1 / Stripe for 64x32 P5 1/8-scan panels)")
     p.add_argument("--rgb-row-addr-type", type=int, default=0, help="rpi-rgb-led-matrix row address type override (0 keeps library default)")

@@ -44,6 +44,6 @@ Install service:
   sudo systemctl enable --now scoreboard.service
 
 Default Pi 4 runtime settings are tuned for three 64x32 P5 1/8-scan panels,
-one panel per Triple Bonnet port:
-  --rgb-layout parallel-ports --rgb-parallel 3 --rgb-chain-length 1 --rgb-multiplexing 1
+one panel per Triple Bonnet port using the Triple Bonnet/Active-3-compatible regular GPIO mapping:
+  --rgb-layout parallel-ports --rgb-gpio-mapping regular --rgb-parallel 3 --rgb-chain-length 1 --rgb-multiplexing 1
 MSG

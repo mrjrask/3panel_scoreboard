@@ -6,6 +6,8 @@ import importlib
 import importlib.metadata
 import json
 import logging
+import os
+import tempfile
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -120,10 +122,60 @@ def load_state() -> ScoreboardState:
     return ScoreboardState()
 
 
+def _restore_sudo_user_ownership(path: Path) -> None:
+    """Keep state files editable by the user who launched the sudo process."""
+    sudo_uid = os.environ.get("SUDO_UID")
+    sudo_gid = os.environ.get("SUDO_GID")
+    if not sudo_uid or not sudo_gid:
+        return
+    try:
+        os.chown(path, int(sudo_uid), int(sudo_gid))
+    except (OSError, ValueError) as exc:
+        LOGGER.debug("Could not update ownership for %s: %s", path, exc)
+
+
 def save_state(state: ScoreboardState) -> None:
-    tmp_path = STATE_FILE.with_suffix(".tmp")
-    tmp_path.write_text(json.dumps(asdict(state)))
-    tmp_path.replace(STATE_FILE)
+    """Persist scoreboard state without reusing stale temporary files.
+
+    Older runs could leave ``scoreboard_state.tmp`` behind with permissions that
+    prevented the next web action from opening it.  Create a unique temporary
+    file in the same directory instead, then atomically replace the JSON state.
+    If persistence is still blocked by filesystem permissions, keep the in-memory
+    scoreboard responsive and log the repair hint instead of returning HTTP 500.
+    """
+    state_payload = json.dumps(asdict(state))
+    state_dir = STATE_FILE.parent if STATE_FILE.parent != Path("") else Path(".")
+    tmp_path: Path | None = None
+
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f"{STATE_FILE.stem}.",
+            suffix=".tmp",
+            dir=state_dir,
+            text=True,
+        )
+        tmp_path = Path(tmp_name)
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+            tmp_file.write(state_payload)
+            tmp_file.write("\n")
+        _restore_sudo_user_ownership(tmp_path)
+        tmp_path.replace(STATE_FILE)
+        _restore_sudo_user_ownership(STATE_FILE)
+    except OSError as exc:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        LOGGER.error(
+            "Unable to save scoreboard state to %s: %s. Controls will keep working "
+            "for this run, but changes will not persist. Check ownership of the "
+            "repo directory and remove any stale %s files if needed.",
+            STATE_FILE,
+            exc,
+            STATE_FILE.with_suffix(".tmp"),
+        )
 
 
 def infer_addr_lines(panel_height: int, panel_scan: str, addr_lines_override: int | None) -> int:

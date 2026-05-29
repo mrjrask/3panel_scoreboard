@@ -66,6 +66,20 @@ If your physical panel arrangement still needs coordinate remapping, pass the li
 python main.py --backend rgbmatrix --rgb-pixel-mapper 'U-mapper;Rotate:90'
 ```
 
+
+## Scoreboard features
+
+This Raspberry Pi/Triple Bonnet adaptation carries forward the manual baseball scoreboard controls from `mrjrask/scoreboard_i75w`:
+
+- Away and home team names up to 10 characters (defaults: `AWAY TEAM` and `HOME TEAM`).
+- Per-section color controls for away/home names and scores, inning label/value, and count labels.
+- Team score increment/decrement controls.
+- Inning increment/decrement controls and top/bottom toggle.
+- Balls (0-3), strikes (0-2), and outs (0-2), including baseball-style strikeout/out advancement and half-inning rollover after three outs.
+- Optional batting-order tracker per team with configurable lineup sizes from 1-20 batters and controls to advance/reset batters.
+- Full reset, plus score-only and count-only reset controls.
+- Automatic JSON state persistence after each change. State writes are flushed and fsynced before the atomic replace so recent web-control changes survive board resets/reboots and abrupt power loss as reliably as the underlying filesystem allows.
+
 ## Web UI
 
 After startup, open:

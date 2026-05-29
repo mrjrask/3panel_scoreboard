@@ -9,15 +9,36 @@ import logging
 import os
 import tempfile
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template_string, request
 from PIL import Image, ImageDraw, ImageFont
 
 STATE_FILE = Path("scoreboard_state.json")
-MAX_TEAM_CHARS = 5
+MAX_TEAM_CHARS = 10
+DEFAULT_TEXT_COLORS = {
+    "team_a_name": "#FFFFFF",
+    "team_a_score": "#FFB400",
+    "team_b_name": "#FFFFFF",
+    "team_b_score": "#FFFFFF",
+    "inning_label": "#FFFFFF",
+    "inning_value": "#FFFFFF",
+    "count_labels": "#3CFF3C",
+}
 LOGGER = logging.getLogger("scoreboard")
+
+
+def is_hex_color(value: object) -> bool:
+    if not isinstance(value, str) or len(value) != 7 or value[0] != "#":
+        return False
+    return all(c in "0123456789abcdefABCDEF" for c in value[1:])
+
+
+def hex_to_rgb(value: str) -> tuple[int, int, int]:
+    if not is_hex_color(value):
+        value = "#FFFFFF"
+    return (int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16))
 
 
 def ensure_werkzeug_metadata_version() -> None:
@@ -56,8 +77,8 @@ def ensure_werkzeug_metadata_version() -> None:
 
 @dataclass
 class ScoreboardState:
-    team_a: str = "AWAY"
-    team_b: str = "HOME"
+    team_a: str = "AWAY TEAM"
+    team_b: str = "HOME TEAM"
     score_a: int = 0
     score_b: int = 0
     inning: int = 1
@@ -67,18 +88,37 @@ class ScoreboardState:
     outs: int = 0
     brightness: int = 70
     locked: bool = False
+    text_colors: dict[str, str] = field(
+        default_factory=lambda: dict(DEFAULT_TEXT_COLORS)
+    )
+    batting_order_enabled: bool = True
+    batting_order_a: int = 9
+    batting_order_b: int = 9
+    current_batter_a: int = 0
+    current_batter_b: int = 0
 
     def clamp(self) -> None:
-        self.team_a = (self.team_a or "AWAY").strip().upper()[:MAX_TEAM_CHARS]
-        self.team_b = (self.team_b or "HOME").strip().upper()[:MAX_TEAM_CHARS]
-        self.score_a = max(0, self.score_a)
-        self.score_b = max(0, self.score_b)
-        self.inning = max(1, self.inning)
-        self.balls = min(max(0, self.balls), 3)
-        self.strikes = min(max(0, self.strikes), 2)
-        self.outs = min(max(0, self.outs), 2)
+        self.team_a = (self.team_a or "AWAY TEAM").strip().upper()[:MAX_TEAM_CHARS]
+        self.team_b = (self.team_b or "HOME TEAM").strip().upper()[:MAX_TEAM_CHARS]
+        self.score_a = max(0, int(self.score_a))
+        self.score_b = max(0, int(self.score_b))
+        self.inning = max(1, int(self.inning))
+        self.balls = min(max(0, int(self.balls)), 3)
+        self.strikes = min(max(0, int(self.strikes)), 2)
+        self.outs = min(max(0, int(self.outs)), 2)
         self.brightness = min(max(5, int(self.brightness)), 100)
         self.locked = bool(self.locked)
+        self.batting_order_enabled = bool(self.batting_order_enabled)
+        self.batting_order_a = min(max(1, int(self.batting_order_a)), 20)
+        self.batting_order_b = min(max(1, int(self.batting_order_b)), 20)
+        self.current_batter_a = int(self.current_batter_a) % self.batting_order_a
+        self.current_batter_b = int(self.current_batter_b) % self.batting_order_b
+        sanitized_colors = dict(DEFAULT_TEXT_COLORS)
+        if isinstance(self.text_colors, dict):
+            for key, value in self.text_colors.items():
+                if key in sanitized_colors and is_hex_color(value):
+                    sanitized_colors[key] = value.upper()
+        self.text_colors = sanitized_colors
         if self.inning_half not in {"top", "bottom"}:
             self.inning_half = "top"
 
@@ -100,14 +140,67 @@ class ScoreboardState:
         elif action == "balls_cycle":
             self.balls = (self.balls + 1) % 4
         elif action == "strikes_cycle":
-            self.strikes = (self.strikes + 1) % 3
+            if self.strikes == 2:
+                self._register_out()
+            else:
+                self.strikes += 1
         elif action == "outs_cycle":
-            self.outs = (self.outs + 1) % 3
+            self._register_out()
         elif action == "reset":
             self.score_a = self.score_b = 0
             self.inning = 1
             self.inning_half = "top"
             self.balls = self.strikes = self.outs = 0
+            self.current_batter_a = self.current_batter_b = 0
+        elif action == "reset_scores":
+            self.score_a = self.score_b = 0
+        elif action == "reset_count":
+            self.balls = self.strikes = 0
+        elif action == "batter_a_advance":
+            self.current_batter_a = (self.current_batter_a + 1) % self.batting_order_a
+        elif action == "batter_b_advance":
+            self.current_batter_b = (self.current_batter_b + 1) % self.batting_order_b
+        elif action == "batter_current_advance":
+            if self.inning_half == "top":
+                self.current_batter_a = (
+                    self.current_batter_a + 1
+                ) % self.batting_order_a
+            else:
+                self.current_batter_b = (
+                    self.current_batter_b + 1
+                ) % self.batting_order_b
+        elif action == "batters_reset_first":
+            self.current_batter_a = self.current_batter_b = 0
+        self.clamp()
+
+    def _advance_half_inning(self) -> None:
+        if self.inning_half == "top":
+            self.inning_half = "bottom"
+        else:
+            self.inning_half = "top"
+            self.inning += 1
+
+    def _register_out(self) -> None:
+        self.outs += 1
+        self.balls = 0
+        self.strikes = 0
+        if self.outs >= 3:
+            self.outs = 0
+            self._advance_half_inning()
+
+    def update_text_colors(self, values: dict[str, str]) -> None:
+        for key in DEFAULT_TEXT_COLORS:
+            value = values.get(key, "")
+            if is_hex_color(value):
+                self.text_colors[key] = value.upper()
+        self.clamp()
+
+    def set_batting_order(self, team_a_count: str, team_b_count: str) -> None:
+        try:
+            self.batting_order_a = int(team_a_count)
+            self.batting_order_b = int(team_b_count)
+        except (TypeError, ValueError):
+            return
         self.clamp()
 
 
@@ -118,7 +211,11 @@ def load_state() -> ScoreboardState:
             s.clamp()
             return s
         except Exception as exc:
-            LOGGER.warning("Failed to load saved state from %s: %s; starting with defaults.", STATE_FILE, exc)
+            LOGGER.warning(
+                "Failed to load saved state from %s: %s; starting with defaults.",
+                STATE_FILE,
+                exc,
+            )
     return ScoreboardState()
 
 
@@ -159,9 +256,19 @@ def save_state(state: ScoreboardState) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
             tmp_file.write(state_payload)
             tmp_file.write("\n")
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
         _restore_sudo_user_ownership(tmp_path)
         tmp_path.replace(STATE_FILE)
         _restore_sudo_user_ownership(STATE_FILE)
+        try:
+            dir_fd = os.open(state_dir, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError as exc:
+            LOGGER.debug("Could not fsync state directory %s: %s", state_dir, exc)
     except OSError as exc:
         if tmp_path is not None:
             try:
@@ -178,7 +285,9 @@ def save_state(state: ScoreboardState) -> None:
         )
 
 
-def infer_addr_lines(panel_height: int, panel_scan: str, addr_lines_override: int | None) -> int:
+def infer_addr_lines(
+    panel_height: int, panel_scan: str, addr_lines_override: int | None
+) -> int:
     """Infer HUB75 address lines for Piomatter geometry.
 
     Defaults in this repo target common 64x32 P5 1/8-scan baseball panels on
@@ -199,6 +308,7 @@ def infer_addr_lines(panel_height: int, panel_scan: str, addr_lines_override: in
     if panel_height == 32:
         return 4
     return max(1, (max(1, panel_height) // 2).bit_length() - 1)
+
 
 class MatrixDisplay:
     def __init__(
@@ -327,6 +437,7 @@ class MatrixDisplay:
 
         try:
             import piomatter
+
             self.backend_name = "piomatter.PioMatter"
             LOGGER.info("Initialized matrix backend: %s", self.backend_name)
             return piomatter.PioMatter(width=width, height=height, bit_depth=bit_depth)
@@ -345,7 +456,9 @@ class MatrixDisplay:
             if driver_cls is None:
                 for module_name in ("rgbmatrix", "piomatter"):
                     try:
-                        mod = importlib.import_module(f"adafruit_blinka_raspberry_pi5_piomatter.{module_name}")
+                        mod = importlib.import_module(
+                            f"adafruit_blinka_raspberry_pi5_piomatter.{module_name}"
+                        )
                     except Exception:
                         continue
                     for class_name in ("RGBMatrix", "PioMatter"):
@@ -386,27 +499,40 @@ class MatrixDisplay:
             for kwargs in init_arg_sets:
                 try:
                     driver = driver_cls(**kwargs)
-                    self.backend_name = f"adafruit_blinka_raspberry_pi5_piomatter.{driver_cls.__name__}"
-                    LOGGER.info("Initialized matrix backend: %s with args=%s", self.backend_name, kwargs)
+                    self.backend_name = (
+                        f"adafruit_blinka_raspberry_pi5_piomatter.{driver_cls.__name__}"
+                    )
+                    LOGGER.info(
+                        "Initialized matrix backend: %s with args=%s",
+                        self.backend_name,
+                        kwargs,
+                    )
                     return driver
                 except TypeError as exc:
                     constructor_errors.append(f"{kwargs}: {exc}")
 
             raise RuntimeError(
-                f"{driver_cls.__name__} constructor signature mismatch: " + " ; ".join(constructor_errors)
+                f"{driver_cls.__name__} constructor signature mismatch: "
+                + " ; ".join(constructor_errors)
             )
         except Exception as exc:
             errors.append(f"adafruit...driver: {exc}")
 
         try:
-            mod = importlib.import_module("adafruit_blinka_raspberry_pi5_piomatter._piomatter")
+            mod = importlib.import_module(
+                "adafruit_blinka_raspberry_pi5_piomatter._piomatter"
+            )
             pio_matter = getattr(mod, "PioMatter")
             colorspace_enum = getattr(mod, "Colorspace")
             pinout_enum = getattr(mod, "Pinout")
             geometry_cls = getattr(mod, "Geometry")
 
             panel_height = max(1, height // max(1, chain_down))
-            n_addr_lines = max(1, int(addr_lines)) if addr_lines is not None else max(1, (panel_height // 2).bit_length() - 1)
+            n_addr_lines = (
+                max(1, int(addr_lines))
+                if addr_lines is not None
+                else max(1, (panel_height // 2).bit_length() - 1)
+            )
 
             geometry = None
             geometry_errors = []
@@ -437,22 +563,41 @@ class MatrixDisplay:
                     geometry_errors.append(f"{gkwargs}: {exc}")
 
             if geometry is None:
-                raise RuntimeError("Geometry constructor signature mismatch: " + " ; ".join(geometry_errors))
+                raise RuntimeError(
+                    "Geometry constructor signature mismatch: "
+                    + " ; ".join(geometry_errors)
+                )
 
-            colorspace = _pick_enum("RGB888", colorspace_enum, ("RGB565", "RGB666", "RGB"))
+            colorspace = _pick_enum(
+                "RGB888", colorspace_enum, ("RGB565", "RGB666", "RGB")
+            )
             # Prefer Triple Matrix Bonnet (Active3) pinouts when driving multiple panels
             # directly from the bonnet. Fall back for older/newer enum names.
             if pinout_hint == "active3":
                 pinout = _pick_enum(
                     "Active3",
                     pinout_enum,
-                    ("ACTIVE3", "Active3BGR", "ACTIVE3BGR", "ADAFRUIT_MATRIXBONNET", "ADAFRUIT_FEATHERWING", "DEFAULT"),
+                    (
+                        "ACTIVE3",
+                        "Active3BGR",
+                        "ACTIVE3BGR",
+                        "ADAFRUIT_MATRIXBONNET",
+                        "ADAFRUIT_FEATHERWING",
+                        "DEFAULT",
+                    ),
                 )
             elif pinout_hint == "active3bgr":
                 pinout = _pick_enum(
                     "Active3BGR",
                     pinout_enum,
-                    ("ACTIVE3BGR", "Active3", "ACTIVE3", "ADAFRUIT_MATRIXBONNET", "ADAFRUIT_FEATHERWING", "DEFAULT"),
+                    (
+                        "ACTIVE3BGR",
+                        "Active3",
+                        "ACTIVE3",
+                        "ADAFRUIT_MATRIXBONNET",
+                        "ADAFRUIT_FEATHERWING",
+                        "DEFAULT",
+                    ),
                 )
             elif pinout_hint == "matrixbonnet":
                 pinout = _pick_enum(
@@ -464,7 +609,14 @@ class MatrixDisplay:
                 pinout = _pick_enum(
                     "Active3",
                     pinout_enum,
-                    ("ACTIVE3", "Active3BGR", "ACTIVE3BGR", "ADAFRUIT_MATRIXBONNET", "ADAFRUIT_FEATHERWING", "DEFAULT"),
+                    (
+                        "ACTIVE3",
+                        "Active3BGR",
+                        "ACTIVE3BGR",
+                        "ADAFRUIT_MATRIXBONNET",
+                        "ADAFRUIT_FEATHERWING",
+                        "DEFAULT",
+                    ),
                 )
             else:
                 pinout = _pick_enum(
@@ -478,7 +630,12 @@ class MatrixDisplay:
             for bytes_per_pixel in (4, 3):
                 framebuffer = bytearray(width * height * bytes_per_pixel)
                 try:
-                    driver = pio_matter(colorspace=colorspace, pinout=pinout, framebuffer=framebuffer, geometry=geometry)
+                    driver = pio_matter(
+                        colorspace=colorspace,
+                        pinout=pinout,
+                        framebuffer=framebuffer,
+                        geometry=geometry,
+                    )
                     self._framebuffer = framebuffer
                     break
                 except Exception as exc:
@@ -487,14 +644,19 @@ class MatrixDisplay:
                     )
 
             if driver is None:
-                raise RuntimeError("PioMatter framebuffer compatibility mismatch: " + " ; ".join(framebuffer_errors))
+                raise RuntimeError(
+                    "PioMatter framebuffer compatibility mismatch: "
+                    + " ; ".join(framebuffer_errors)
+                )
 
             if hasattr(driver, "bit_depth"):
                 try:
                     driver.bit_depth = bit_depth
                 except Exception:
                     pass
-            self.backend_name = "adafruit_blinka_raspberry_pi5_piomatter._piomatter.PioMatter"
+            self.backend_name = (
+                "adafruit_blinka_raspberry_pi5_piomatter._piomatter.PioMatter"
+            )
             LOGGER.info("Initialized matrix backend: %s", self.backend_name)
             return driver
         except Exception as exc:
@@ -552,13 +714,31 @@ class MatrixDisplay:
         panel_count = max(1, chain_across * chain_down)
 
         if layout == "parallel-ports":
-            parallel = max(1, int(parallel_override if parallel_override is not None else panel_count))
-            chain_length = max(1, int(chain_length_override if chain_length_override is not None else 1))
+            parallel = max(
+                1,
+                int(
+                    parallel_override if parallel_override is not None else panel_count
+                ),
+            )
+            chain_length = max(
+                1,
+                int(chain_length_override if chain_length_override is not None else 1),
+            )
             rows = panel_rows
             cols = panel_cols
         else:
-            parallel = max(1, int(parallel_override if parallel_override is not None else chain_down))
-            chain_length = max(1, int(chain_length_override if chain_length_override is not None else chain_across))
+            parallel = max(
+                1,
+                int(parallel_override if parallel_override is not None else chain_down),
+            )
+            chain_length = max(
+                1,
+                int(
+                    chain_length_override
+                    if chain_length_override is not None
+                    else chain_across
+                ),
+            )
             rows = max(1, height // parallel)
             cols = max(1, width // chain_length)
 
@@ -577,7 +757,14 @@ class MatrixDisplay:
             canvas_width = cols * chain_length
             canvas_height = rows * parallel
             if (canvas_width, canvas_height) != (width, height):
-                self._rgbmatrix_panel_remap = (chain_across, chain_down, panel_cols, panel_rows, canvas_width, canvas_height)
+                self._rgbmatrix_panel_remap = (
+                    chain_across,
+                    chain_down,
+                    panel_cols,
+                    panel_rows,
+                    canvas_width,
+                    canvas_height,
+                )
 
         options = RGBMatrixOptions()
         options.hardware_mapping = gpio_mapping
@@ -635,7 +822,14 @@ class MatrixDisplay:
         if self._rgbmatrix_panel_remap is None:
             return rgb_image
 
-        chain_across, chain_down, panel_cols, panel_rows, canvas_width, canvas_height = self._rgbmatrix_panel_remap
+        (
+            chain_across,
+            chain_down,
+            panel_cols,
+            panel_rows,
+            canvas_width,
+            canvas_height,
+        ) = self._rgbmatrix_panel_remap
         remapped = Image.new("RGB", (canvas_width, canvas_height), (0, 0, 0))
         for panel_y in range(chain_down):
             for panel_x in range(chain_across):
@@ -651,7 +845,9 @@ class MatrixDisplay:
 
     def _blit_to_framebuffer(self, image: Image.Image) -> None:
         if self._framebuffer is None:
-            raise RuntimeError("Driver requires framebuffer updates but no framebuffer is available")
+            raise RuntimeError(
+                "Driver requires framebuffer updates but no framebuffer is available"
+            )
 
         rgb_bytes = image.convert("RGB").tobytes("raw", "RGB")
         pixel_count = self.width * self.height
@@ -666,7 +862,9 @@ class MatrixDisplay:
                 out[dst : dst + 3] = rgb_bytes[src : src + 3]
             self._framebuffer[:] = out
             return
-        raise RuntimeError(f"Unsupported framebuffer size {len(self._framebuffer)} for {pixel_count} pixels")
+        raise RuntimeError(
+            f"Unsupported framebuffer size {len(self._framebuffer)} for {pixel_count} pixels"
+        )
 
 
 class MatrixRenderer:
@@ -681,9 +879,14 @@ class MatrixRenderer:
 
     def draw_mode(self, mode: str = "scoreboard") -> None:
         with self.lock:
-            image = Image.new("RGB", (self.display.width, self.display.height), (0, 0, 0))
+            image = Image.new(
+                "RGB", (self.display.width, self.display.height), (0, 0, 0)
+            )
             draw = ImageDraw.Draw(image)
-            white, amber, red, green = (255, 255, 255), (255, 180, 0), (255, 50, 50), (60, 255, 60)
+            white, red, dim = (255, 255, 255), (255, 50, 50), (48, 48, 48)
+            colors = {
+                key: hex_to_rgb(value) for key, value in self.state.text_colors.items()
+            }
             if mode == "panel_test":
                 self._draw_panel_test(draw)
                 self.display.show(image, self.state.brightness)
@@ -695,26 +898,210 @@ class MatrixRenderer:
             if self.display.height > self.display.width:
                 panel_h = self.display.height // 3
 
-                def block(y: int, title: str, team: str, score: int):
-                    draw.text((2, y + 2), title, fill=white, font=self.font)
-                    draw.text((2, y + 16), team, fill=white, font=self.font)
-                    draw.text((self.display.width - 12, y + 16), str(score), fill=amber, font=self.font)
+                def block(
+                    y: int,
+                    team: str,
+                    score: int,
+                    name_key: str,
+                    score_key: str,
+                    batter: int,
+                    lineup: int,
+                ):
+                    draw.text((2, y + 1), team, fill=colors[name_key], font=self.font)
+                    if self.state.batting_order_enabled:
+                        self._draw_batting_order(
+                            draw, 2, y + 10, lineup, batter, colors[name_key], dim
+                        )
+                    score_text = str(score)
+                    draw.text(
+                        (self.display.width - (len(score_text) * 6) - 2, y + 15),
+                        score_text,
+                        fill=colors[score_key],
+                        font=self.font,
+                    )
 
-                block(0, "AWAY", self.state.team_a, self.state.score_a)
-                block(panel_h, "HOME", self.state.team_b, self.state.score_b)
+                block(
+                    0,
+                    self.state.team_a,
+                    self.state.score_a,
+                    "team_a_name",
+                    "team_a_score",
+                    self.state.current_batter_a,
+                    self.state.batting_order_a,
+                )
+                block(
+                    panel_h,
+                    self.state.team_b,
+                    self.state.score_b,
+                    "team_b_name",
+                    "team_b_score",
+                    self.state.current_batter_b,
+                    self.state.batting_order_b,
+                )
                 y = panel_h * 2
                 half = "TOP" if self.state.inning_half == "top" else "BOT"
-                draw.text((2, y + 2), f"{half} {self.state.inning}", fill=white, font=self.font)
-                draw.text((2, y + 16), f"B{self.state.balls} S{self.state.strikes}", fill=green, font=self.font)
-                draw.text((2, y + 28), f"OUT {self.state.outs}", fill=red, font=self.font)
+                half_color = (
+                    colors["team_a_name"]
+                    if self.state.inning_half == "top"
+                    else colors["team_b_name"]
+                )
+                draw.text(
+                    (2, y + 2), "INN", fill=colors["inning_label"], font=self.font
+                )
+                draw.text(
+                    (25, y + 2),
+                    f"{half} {self.state.inning}",
+                    fill=half_color,
+                    font=self.font,
+                )
+                draw.text(
+                    (2, y + 16),
+                    f"B{self.state.balls} S{self.state.strikes}",
+                    fill=colors["count_labels"],
+                    font=self.font,
+                )
+                draw.text(
+                    (2, y + 28), f"OUT {self.state.outs}", fill=red, font=self.font
+                )
             else:
                 panel_w = self.display.width // 3
                 half = "TOP" if self.state.inning_half == "top" else "BOT"
-                draw.text((2, 2), f"A {self.state.team_a} {self.state.score_a}", fill=amber, font=self.font)
-                draw.text((panel_w + 2, 2), f"H {self.state.team_b} {self.state.score_b}", fill=white, font=self.font)
-                draw.text((panel_w * 2 + 2, 2), f"{half} {self.state.inning}", fill=white, font=self.font)
-                draw.text((panel_w * 2 + 2, 16), f"B{self.state.balls} S{self.state.strikes} O{self.state.outs}", fill=green, font=self.font)
+                self._draw_team_panel(
+                    draw,
+                    0,
+                    panel_w,
+                    self.state.team_a,
+                    self.state.score_a,
+                    "team_a_name",
+                    "team_a_score",
+                    self.state.current_batter_a,
+                    self.state.batting_order_a,
+                    colors,
+                    dim,
+                )
+                self._draw_team_panel(
+                    draw,
+                    panel_w,
+                    panel_w,
+                    self.state.team_b,
+                    self.state.score_b,
+                    "team_b_name",
+                    "team_b_score",
+                    self.state.current_batter_b,
+                    self.state.batting_order_b,
+                    colors,
+                    dim,
+                )
+                half_color = (
+                    colors["team_a_name"]
+                    if self.state.inning_half == "top"
+                    else colors["team_b_name"]
+                )
+                info_x = panel_w * 2 + 2
+                draw.text(
+                    (info_x, 1), "INN", fill=colors["inning_label"], font=self.font
+                )
+                draw.text(
+                    (info_x + 24, 1),
+                    str(self.state.inning),
+                    fill=colors["inning_value"],
+                    font=self.font,
+                )
+                draw.text((info_x, 10), half, fill=half_color, font=self.font)
+                self._draw_count_dots(
+                    draw,
+                    info_x,
+                    21,
+                    "B",
+                    self.state.balls,
+                    3,
+                    colors["count_labels"],
+                    red,
+                    dim,
+                )
+                self._draw_count_dots(
+                    draw,
+                    info_x + 23,
+                    21,
+                    "S",
+                    self.state.strikes,
+                    2,
+                    colors["count_labels"],
+                    red,
+                    dim,
+                )
+                self._draw_count_dots(
+                    draw,
+                    info_x + 42,
+                    21,
+                    "O",
+                    self.state.outs,
+                    2,
+                    colors["count_labels"],
+                    red,
+                    dim,
+                )
             self.display.show(image, self.state.brightness)
+
+    def _draw_team_panel(
+        self,
+        draw: ImageDraw.ImageDraw,
+        x: int,
+        width: int,
+        team: str,
+        score: int,
+        name_key: str,
+        score_key: str,
+        current_batter: int,
+        lineup_size: int,
+        colors: dict[str, tuple[int, int, int]],
+        dim: tuple[int, int, int],
+    ) -> None:
+        draw.text((x + 2, 1), team, fill=colors[name_key], font=self.font)
+        if self.state.batting_order_enabled:
+            self._draw_batting_order(
+                draw, x + 2, 10, lineup_size, current_batter, colors[name_key], dim
+            )
+        score_text = str(score)
+        score_x = x + width - (len(score_text) * 6) - 2
+        draw.text(
+            (max(x + 2, score_x), 18),
+            score_text,
+            fill=colors[score_key],
+            font=self.font,
+        )
+
+    def _draw_batting_order(
+        self,
+        draw: ImageDraw.ImageDraw,
+        x: int,
+        y: int,
+        lineup_size: int,
+        current_batter: int,
+        active_color: tuple[int, int, int],
+        inactive_color: tuple[int, int, int],
+    ) -> None:
+        for batter in range(lineup_size):
+            fill = active_color if batter == current_batter else inactive_color
+            draw.point((x + batter * 3, y), fill=fill)
+
+    def _draw_count_dots(
+        self,
+        draw: ImageDraw.ImageDraw,
+        x: int,
+        y: int,
+        label: str,
+        count: int,
+        max_count: int,
+        label_color: tuple[int, int, int],
+        active_color: tuple[int, int, int],
+        inactive_color: tuple[int, int, int],
+    ) -> None:
+        draw.text((x, y - 5), label, fill=label_color, font=self.font)
+        for idx in range(max_count):
+            dot_x = x + 8 + (idx * 5)
+            fill = active_color if idx < count else inactive_color
+            draw.ellipse((dot_x, y - 1, dot_x + 2, y + 1), fill=fill)
 
     def _draw_panel_test(self, draw: ImageDraw.ImageDraw) -> None:
         panel_w = max(1, self.display.width // 3)
@@ -725,7 +1112,12 @@ class MatrixRenderer:
             x1 = min(self.display.width - 1, x0 + panel_w - 1)
             draw.rectangle((x0, 0, x1, self.display.height - 1), outline=color, width=1)
             draw.text((x0 + 2, 2), label, fill=color, font=self.font)
-            draw.text((x0 + 2, 14), color == colors[0] and "R" or color == colors[1] and "G" or "B", fill=color, font=self.font)
+            draw.text(
+                (x0 + 2, 14),
+                color == colors[0] and "R" or color == colors[1] and "G" or "B",
+                fill=color,
+                font=self.font,
+            )
 
 
 HTML = """<!doctype html>
@@ -750,6 +1142,10 @@ button.lock { background:#355d2f; }
 button.unlock { background:#8d6a24; }
 fieldset { border:none; padding:0; margin:0; }
 input { width:100%; border-radius:10px; border:1px solid #3a4357; background:#0f141d; color:#fff; padding:10px; font-size:1rem; box-sizing:border-box; }
+input[type=color] { height:44px; padding:4px; }
+input[type=checkbox] { width:auto; }
+.formgrid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; }
+.inline { display:flex; align-items:center; gap:10px; margin:10px 0; }
 label { display:block; margin:8px 0 6px; color:#c9d3e3; }
 .small { font-size:0.9rem; color:#96a2b7; }
 </style>
@@ -759,7 +1155,7 @@ label { display:block; margin:8px 0 6px; color:#c9d3e3; }
   <div class='card status'>
     <div>
       <div class='scoreline'>{{s.team_a}} {{s.score_a}} &nbsp;|&nbsp; {{s.team_b}} {{s.score_b}}</div>
-      <div class='meta'>{{s.inning_half|upper}} {{s.inning}} • B{{s.balls}} S{{s.strikes}} O{{s.outs}}</div>
+      <div class='meta'>{{s.inning_half|upper}} {{s.inning}} • B{{s.balls}} S{{s.strikes}} O{{s.outs}}{% if s.batting_order_enabled %} • Batters A{{s.current_batter_a + 1}}/{{s.batting_order_a}} H{{s.current_batter_b + 1}}/{{s.batting_order_b}}{% endif %}</div>
     </div>
     <form method='post' action='/lock-toggle'>
       <button class='{{"unlock" if s.locked else "lock"}}'>{{"Unlock Controls" if s.locked else "Lock Controls"}}</button>
@@ -774,6 +1170,26 @@ label { display:block; margin:8px 0 6px; color:#c9d3e3; }
         <div style='margin-top:10px;'><button>Save Team Names</button></div>
       </fieldset>
       {% if s.locked %}<p class='small'>Unlock controls to rename teams.</p>{% endif %}
+    </form>
+  </div>
+
+
+  <div class='card'>
+    <form method='post' action='/config'>
+      <fieldset {{'disabled' if s.locked else ''}}>
+        <h2 style='margin-top:0;'>Layout & Colors</h2>
+        <div class='formgrid'>
+          {% for key,label in color_fields %}
+            <div><label>{{label}}</label><input type='color' name='{{key}}' value='{{s.text_colors[key]}}'></div>
+          {% endfor %}
+        </div>
+        <div class='inline'><input type='checkbox' name='batting_order_enabled' value='1' {% if s.batting_order_enabled %}checked{% endif %}><label style='margin:0;'>Show batting-order tracker</label></div>
+        <div class='formgrid'>
+          <div><label>Away Lineup Size</label><input type='number' name='batting_order_a' value='{{s.batting_order_a}}' min='1' max='20'></div>
+          <div><label>Home Lineup Size</label><input type='number' name='batting_order_b' value='{{s.batting_order_b}}' min='1' max='20'></div>
+        </div>
+        <div style='margin-top:10px;'><button>Save Layout & Colors</button></div>
+      </fieldset>
     </form>
   </div>
 
@@ -807,12 +1223,34 @@ def create_app(state: ScoreboardState, renderer: MatrixRenderer) -> Flask:
         ("Cycle Balls", "balls_cycle", ""),
         ("Cycle Strikes", "strikes_cycle", ""),
         ("Cycle Outs", "outs_cycle", ""),
-        ("Reset", "reset", "warn"),
+        ("Advance Current Batter", "batter_current_advance", ""),
+        ("Away Batter +1", "batter_a_advance", ""),
+        ("Home Batter +1", "batter_b_advance", ""),
+        ("Reset Batters", "batters_reset_first", ""),
+        ("Reset Count", "reset_count", ""),
+        ("Reset Scores", "reset_scores", ""),
+        ("Full Reset", "reset", "warn"),
+    ]
+
+    color_fields = [
+        ("team_a_name", "Away Team Name"),
+        ("team_a_score", "Away Team Score"),
+        ("team_b_name", "Home Team Name"),
+        ("team_b_score", "Home Team Score"),
+        ("inning_label", "Inning Label"),
+        ("inning_value", "Inning Value"),
+        ("count_labels", "Count Labels"),
     ]
 
     @app.get("/")
     def index():
-        return render_template_string(HTML, s=state, max_team_chars=MAX_TEAM_CHARS, actions=actions)
+        return render_template_string(
+            HTML,
+            s=state,
+            max_team_chars=MAX_TEAM_CHARS,
+            actions=actions,
+            color_fields=color_fields,
+        )
 
     @app.post("/lock-toggle")
     def lock_toggle():
@@ -844,7 +1282,24 @@ def create_app(state: ScoreboardState, renderer: MatrixRenderer) -> Flask:
             renderer.draw()
         return redirect("/")
 
-    @app.get('/state')
+    @app.post("/config")
+    def config():
+        with state_lock:
+            if state.locked:
+                return redirect("/")
+            state.update_text_colors(request.form)
+            state.batting_order_enabled = (
+                request.form.get("batting_order_enabled") == "1"
+            )
+            state.set_batting_order(
+                request.form.get("batting_order_a", str(state.batting_order_a)),
+                request.form.get("batting_order_b", str(state.batting_order_b)),
+            )
+            save_state(state)
+            renderer.draw()
+        return redirect("/")
+
+    @app.get("/state")
     def get_state():
         return jsonify(asdict(state))
 
@@ -860,10 +1315,29 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--chain-down", type=int, default=1)
     p.add_argument("--bit-depth", type=int, default=6)
     p.add_argument("--brightness", type=int, default=70)
-    p.add_argument("--backend", choices=("auto", "piomatter", "rgbmatrix"), default="auto", help="Matrix driver backend (Pi 5 uses piomatter; Pi 4 uses rgbmatrix)")
-    p.add_argument("--addr-lines", type=int, default=None, help="Override HUB75 address lines (e.g. 4 for 1/8 scan 32px-tall panels)")
-    p.add_argument("--panel-scan", choices=("auto", "1/8", "1/16", "1/32"), default="1/8", help="Panel scan ratio hint used to infer address lines when --addr-lines is omitted (repo default: 1/8 for common 64x32 P5 panels)")
-    p.add_argument("--serpentine", action="store_true", help="Enable serpentine panel layout in low-level _piomatter fallback (usually OFF for Triple Bonnet direct-per-port wiring)")
+    p.add_argument(
+        "--backend",
+        choices=("auto", "piomatter", "rgbmatrix"),
+        default="auto",
+        help="Matrix driver backend (Pi 5 uses piomatter; Pi 4 uses rgbmatrix)",
+    )
+    p.add_argument(
+        "--addr-lines",
+        type=int,
+        default=None,
+        help="Override HUB75 address lines (e.g. 4 for 1/8 scan 32px-tall panels)",
+    )
+    p.add_argument(
+        "--panel-scan",
+        choices=("auto", "1/8", "1/16", "1/32"),
+        default="1/8",
+        help="Panel scan ratio hint used to infer address lines when --addr-lines is omitted (repo default: 1/8 for common 64x32 P5 panels)",
+    )
+    p.add_argument(
+        "--serpentine",
+        action="store_true",
+        help="Enable serpentine panel layout in low-level _piomatter fallback (usually OFF for Triple Bonnet direct-per-port wiring)",
+    )
     p.add_argument(
         "--pinout",
         choices=("auto", "active3", "active3bgr", "matrixbonnet"),
@@ -875,12 +1349,41 @@ def parse_args() -> argparse.Namespace:
         default="regular",
         help="rpi-rgb-led-matrix GPIO mapping for Pi 4 installs (default: regular / Active-3 pinout for Triple Bonnet parallel outputs)",
     )
-    p.add_argument("--rgb-slowdown-gpio", type=int, default=2, help="rpi-rgb-led-matrix GPIO slowdown value")
-    p.add_argument("--rgb-multiplexing", type=int, default=1, help="rpi-rgb-led-matrix multiplexing mode (default: 1 / Stripe for 64x32 P5 1/8-scan panels)")
-    p.add_argument("--rgb-row-addr-type", type=int, default=0, help="rpi-rgb-led-matrix row address type override (0 keeps library default)")
-    p.add_argument("--rgb-chain-length", type=int, default=None, help="Override rpi-rgb-led-matrix chain length")
-    p.add_argument("--rgb-parallel", type=int, default=None, help="Override rpi-rgb-led-matrix parallel chain count")
-    p.add_argument("--rgb-pixel-mapper", default="", help="rpi-rgb-led-matrix pixel mapper config, e.g. 'U-mapper;Rotate:90'")
+    p.add_argument(
+        "--rgb-slowdown-gpio",
+        type=int,
+        default=2,
+        help="rpi-rgb-led-matrix GPIO slowdown value",
+    )
+    p.add_argument(
+        "--rgb-multiplexing",
+        type=int,
+        default=1,
+        help="rpi-rgb-led-matrix multiplexing mode (default: 1 / Stripe for 64x32 P5 1/8-scan panels)",
+    )
+    p.add_argument(
+        "--rgb-row-addr-type",
+        type=int,
+        default=0,
+        help="rpi-rgb-led-matrix row address type override (0 keeps library default)",
+    )
+    p.add_argument(
+        "--rgb-chain-length",
+        type=int,
+        default=None,
+        help="Override rpi-rgb-led-matrix chain length",
+    )
+    p.add_argument(
+        "--rgb-parallel",
+        type=int,
+        default=None,
+        help="Override rpi-rgb-led-matrix parallel chain count",
+    )
+    p.add_argument(
+        "--rgb-pixel-mapper",
+        default="",
+        help="rpi-rgb-led-matrix pixel mapper config, e.g. 'U-mapper;Rotate:90'",
+    )
     p.add_argument(
         "--led-no-hardware-pulse",
         "--rgb-no-hardware-pulse",
@@ -896,7 +1399,11 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--listen", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8080)
-    p.add_argument("--init-only", action="store_true", help="Initialize LED driver, draw one frame, then exit (hardware diagnostics)")
+    p.add_argument(
+        "--init-only",
+        action="store_true",
+        help="Initialize LED driver, draw one frame, then exit (hardware diagnostics)",
+    )
     p.add_argument(
         "--test-pattern",
         choices=("off", "panel"),
@@ -907,7 +1414,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
     args = parse_args()
     state = load_state()
     state.brightness = args.brightness
@@ -917,7 +1426,9 @@ def main() -> None:
         print("[scoreboard] Using vertical geometry (64x96).")
     elif args.chain_across == 3 and args.chain_down == 1:
         print("[scoreboard] Using horizontal geometry (192x32).")
-    inferred_addr_lines = infer_addr_lines(args.panel_height, args.panel_scan, args.addr_lines)
+    inferred_addr_lines = infer_addr_lines(
+        args.panel_height, args.panel_scan, args.addr_lines
+    )
     print(
         f"[scoreboard] geometry={width}x{height} panel={args.panel_width}x{args.panel_height} "
         f"backend={args.backend} scan={args.panel_scan} addr_lines={inferred_addr_lines} "
@@ -925,7 +1436,9 @@ def main() -> None:
         f"rgb_layout={args.rgb_layout} rgb_multiplexing={args.rgb_multiplexing} "
         f"rgb_no_hardware_pulse={args.rgb_no_hardware_pulse}"
     )
-    print("[scoreboard] Default panel-scan is 1/8 for this repo. Use --panel-scan auto|1/16|1/32 or --addr-lines to match other panel types.")
+    print(
+        "[scoreboard] Default panel-scan is 1/8 for this repo. Use --panel-scan auto|1/16|1/32 or --addr-lines to match other panel types."
+    )
     display = MatrixDisplay(
         width,
         height,
@@ -954,7 +1467,9 @@ def main() -> None:
         renderer.draw()
     LOGGER.info("Initial frame rendered using backend=%s", display.backend_name)
     if args.init_only:
-        LOGGER.info("--init-only set; exiting after successful matrix initialization and first draw")
+        LOGGER.info(
+            "--init-only set; exiting after successful matrix initialization and first draw"
+        )
         return
     ensure_werkzeug_metadata_version()
     create_app(state, renderer).run(host=args.listen, port=args.port)

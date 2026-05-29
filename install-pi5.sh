@@ -21,9 +21,9 @@ python -m pip install "git+$PIOMATTER_REPO"
 
 cat <<MSG
 
-Install complete.
+Install complete for Raspberry Pi 5 / Blinka Piomatter.
 Run as script:
-  sudo -E env PATH="$VENV_DIR/bin:\$PATH" python "$REPO_DIR/main.py"
+  sudo -E env PATH="$VENV_DIR/bin:\$PATH" python "$REPO_DIR/main.py" --backend piomatter
 
 Install service:
   sudo cp "$REPO_DIR/systemd/scoreboard.service" /etc/systemd/system/scoreboard.service

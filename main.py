@@ -113,7 +113,7 @@ def infer_addr_lines(panel_height: int, panel_scan: str, addr_lines_override: in
         return 4
     return max(1, (max(1, panel_height) // 2).bit_length() - 1)
 
-class PiomatterDisplay:
+class MatrixDisplay:
     def __init__(
         self,
         width: int,
@@ -124,12 +124,40 @@ class PiomatterDisplay:
         addr_lines: int | None = None,
         serpentine: bool = False,
         pinout_hint: str = "auto",
+        backend: str = "auto",
+        rgb_gpio_mapping: str = "adafruit-hat",
+        rgb_slowdown_gpio: int = 2,
+        rgb_multiplexing: int = 1,
+        rgb_row_addr_type: int = 0,
+        rgb_chain_length: int | None = None,
+        rgb_parallel: int | None = None,
+        rgb_pixel_mapper: str = "",
+        rgb_layout: str = "parallel-ports",
     ):
         self.width = width
         self.height = height
         self._framebuffer: bytearray | None = None
+        self._rgbmatrix_panel_remap: tuple[int, int, int, int, int, int] | None = None
         self.backend_name: str = "unknown"
-        self._driver = self._init_driver(width, height, bit_depth, chain_across, chain_down, addr_lines, serpentine, pinout_hint)
+        self._driver = self._init_driver(
+            width,
+            height,
+            bit_depth,
+            chain_across,
+            chain_down,
+            addr_lines,
+            serpentine,
+            pinout_hint,
+            backend,
+            rgb_gpio_mapping,
+            rgb_slowdown_gpio,
+            rgb_multiplexing,
+            rgb_row_addr_type,
+            rgb_chain_length,
+            rgb_parallel,
+            rgb_pixel_mapper,
+            rgb_layout,
+        )
 
     def _init_driver(
         self,
@@ -141,6 +169,15 @@ class PiomatterDisplay:
         addr_lines: int | None,
         serpentine: bool,
         pinout_hint: str,
+        backend: str,
+        rgb_gpio_mapping: str,
+        rgb_slowdown_gpio: int,
+        rgb_multiplexing: int,
+        rgb_row_addr_type: int,
+        rgb_chain_length: int | None,
+        rgb_parallel: int | None,
+        rgb_pixel_mapper: str,
+        rgb_layout: str,
     ):
         def _pick_enum(default_name: str, enum_obj, fallbacks: tuple[str, ...]):
             names = (default_name, *fallbacks)
@@ -180,6 +217,23 @@ class PiomatterDisplay:
             raise RuntimeError(f"Could not select a value from enum {enum_obj}")
 
         errors = []
+        if backend == "rgbmatrix":
+            return self._init_rgbmatrix(
+                width,
+                height,
+                bit_depth,
+                chain_across,
+                chain_down,
+                rgb_gpio_mapping,
+                rgb_slowdown_gpio,
+                rgb_multiplexing,
+                rgb_row_addr_type,
+                rgb_chain_length,
+                rgb_parallel,
+                rgb_pixel_mapper,
+                rgb_layout,
+            )
+
         try:
             import piomatter
             self.backend_name = "piomatter.PioMatter"
@@ -355,26 +409,139 @@ class PiomatterDisplay:
         except Exception as exc:
             errors.append(f"adafruit..._piomatter: {exc}")
 
+        if backend == "auto":
+            try:
+                return self._init_rgbmatrix(
+                    width,
+                    height,
+                    bit_depth,
+                    chain_across,
+                    chain_down,
+                    rgb_gpio_mapping,
+                    rgb_slowdown_gpio,
+                    rgb_multiplexing,
+                    rgb_row_addr_type,
+                    rgb_chain_length,
+                    rgb_parallel,
+                    rgb_pixel_mapper,
+                    rgb_layout,
+                )
+            except Exception as exc:
+                errors.append(f"rgbmatrix.RGBMatrix: {exc}")
+
         raise RuntimeError(
-            "Unable to initialize Blinka Pi5 Piomatter driver. "
-            "Install Adafruit_Blinka_Raspberry_Pi5_Piomatter and verify API compatibility. "
+            "Unable to initialize a supported HUB75 matrix driver. "
+            "Install the Pi 5 Piomatter package or the Pi 4 rpi-rgb-led-matrix package, "
+            "then choose --backend piomatter|rgbmatrix if auto-detection is ambiguous. "
             + " | ".join(errors)
         )
 
+    def _init_rgbmatrix(
+        self,
+        width: int,
+        height: int,
+        bit_depth: int,
+        chain_across: int,
+        chain_down: int,
+        gpio_mapping: str,
+        slowdown_gpio: int,
+        multiplexing: int,
+        row_addr_type: int,
+        chain_length_override: int | None,
+        parallel_override: int | None,
+        pixel_mapper: str,
+        layout: str,
+    ):
+        from rgbmatrix import RGBMatrix, RGBMatrixOptions
+
+        panel_cols = max(1, width // max(1, chain_across))
+        panel_rows = max(1, height // max(1, chain_down))
+        panel_count = max(1, chain_across * chain_down)
+
+        if layout == "parallel-ports":
+            parallel = max(1, int(parallel_override if parallel_override is not None else panel_count))
+            chain_length = max(1, int(chain_length_override if chain_length_override is not None else 1))
+            rows = panel_rows
+            cols = panel_cols
+        else:
+            parallel = max(1, int(parallel_override if parallel_override is not None else chain_down))
+            chain_length = max(1, int(chain_length_override if chain_length_override is not None else chain_across))
+            rows = max(1, height // parallel)
+            cols = max(1, width // chain_length)
+
+        if layout == "parallel-ports" and chain_length == 1 and parallel == panel_count:
+            canvas_width = cols * chain_length
+            canvas_height = rows * parallel
+            if (canvas_width, canvas_height) != (width, height):
+                self._rgbmatrix_panel_remap = (chain_across, chain_down, panel_cols, panel_rows, canvas_width, canvas_height)
+
+        options = RGBMatrixOptions()
+        options.hardware_mapping = gpio_mapping
+        options.rows = rows
+        options.cols = cols
+        options.chain_length = chain_length
+        options.parallel = parallel
+        options.pwm_bits = bit_depth
+        options.gpio_slowdown = max(0, int(slowdown_gpio))
+        if multiplexing:
+            options.multiplexing = int(multiplexing)
+        if row_addr_type:
+            options.row_address_type = int(row_addr_type)
+        if pixel_mapper:
+            options.pixel_mapper_config = pixel_mapper
+
+        matrix = RGBMatrix(options=options)
+        self.backend_name = "rgbmatrix.RGBMatrix"
+        LOGGER.info(
+            "Initialized matrix backend: %s rows=%s cols=%s chain_length=%s parallel=%s gpio_mapping=%s layout=%s",
+            self.backend_name,
+            rows,
+            cols,
+            chain_length,
+            parallel,
+            gpio_mapping,
+            layout,
+        )
+        return matrix
+
     def show(self, image: Image.Image, brightness: int) -> None:
         if hasattr(self._driver, "brightness"):
-            self._driver.brightness = brightness / 100.0
+            if self.backend_name.startswith("rgbmatrix"):
+                self._driver.brightness = int(brightness)
+            else:
+                self._driver.brightness = brightness / 100.0
         if hasattr(self._driver, "show"):
             try:
                 self._driver.show(image)
             except TypeError:
                 self._blit_to_framebuffer(image)
                 self._driver.show()
+        elif hasattr(self._driver, "SetImage"):
+            self._driver.SetImage(self._prepare_rgbmatrix_image(image))
         elif hasattr(self._driver, "image") and hasattr(self._driver, "refresh"):
             self._driver.image = image
             self._driver.refresh()
         else:
-            raise RuntimeError("Piomatter driver missing supported frame output method")
+            raise RuntimeError("Matrix driver missing supported frame output method")
+
+    def _prepare_rgbmatrix_image(self, image: Image.Image) -> Image.Image:
+        rgb_image = image.convert("RGB")
+        if self._rgbmatrix_panel_remap is None:
+            return rgb_image
+
+        chain_across, chain_down, panel_cols, panel_rows, canvas_width, canvas_height = self._rgbmatrix_panel_remap
+        remapped = Image.new("RGB", (canvas_width, canvas_height), (0, 0, 0))
+        for panel_y in range(chain_down):
+            for panel_x in range(chain_across):
+                panel_index = panel_y * chain_across + panel_x
+                src_box = (
+                    panel_x * panel_cols,
+                    panel_y * panel_rows,
+                    (panel_x + 1) * panel_cols,
+                    (panel_y + 1) * panel_rows,
+                )
+                remapped.paste(rgb_image.crop(src_box), (0, panel_index * panel_rows))
+        return remapped
 
     def _blit_to_framebuffer(self, image: Image.Image) -> None:
         if self._framebuffer is None:
@@ -397,7 +564,7 @@ class PiomatterDisplay:
 
 
 class MatrixRenderer:
-    def __init__(self, display: PiomatterDisplay, state: ScoreboardState):
+    def __init__(self, display: MatrixDisplay, state: ScoreboardState):
         self.display = display
         self.state = state
         self.lock = threading.Lock()
@@ -587,6 +754,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--chain-down", type=int, default=1)
     p.add_argument("--bit-depth", type=int, default=6)
     p.add_argument("--brightness", type=int, default=70)
+    p.add_argument("--backend", choices=("auto", "piomatter", "rgbmatrix"), default="auto", help="Matrix driver backend (Pi 5 uses piomatter; Pi 4 uses rgbmatrix)")
     p.add_argument("--addr-lines", type=int, default=None, help="Override HUB75 address lines (e.g. 4 for 1/8 scan 32px-tall panels)")
     p.add_argument("--panel-scan", choices=("auto", "1/8", "1/16", "1/32"), default="1/8", help="Panel scan ratio hint used to infer address lines when --addr-lines is omitted (repo default: 1/8 for common 64x32 P5 panels)")
     p.add_argument("--serpentine", action="store_true", help="Enable serpentine panel layout in low-level _piomatter fallback (usually OFF for Triple Bonnet direct-per-port wiring)")
@@ -595,6 +763,19 @@ def parse_args() -> argparse.Namespace:
         choices=("auto", "active3", "active3bgr", "matrixbonnet"),
         default="auto",
         help="Force low-level _piomatter pinout selection for diagnostics (default: auto)",
+    )
+    p.add_argument("--rgb-gpio-mapping", default="adafruit-hat", help="rpi-rgb-led-matrix GPIO mapping for Pi 4 installs")
+    p.add_argument("--rgb-slowdown-gpio", type=int, default=2, help="rpi-rgb-led-matrix GPIO slowdown value")
+    p.add_argument("--rgb-multiplexing", type=int, default=1, help="rpi-rgb-led-matrix multiplexing mode (default: 1 / Stripe for 64x32 P5 1/8-scan panels)")
+    p.add_argument("--rgb-row-addr-type", type=int, default=0, help="rpi-rgb-led-matrix row address type override (0 keeps library default)")
+    p.add_argument("--rgb-chain-length", type=int, default=None, help="Override rpi-rgb-led-matrix chain length")
+    p.add_argument("--rgb-parallel", type=int, default=None, help="Override rpi-rgb-led-matrix parallel chain count")
+    p.add_argument("--rgb-pixel-mapper", default="", help="rpi-rgb-led-matrix pixel mapper config, e.g. 'U-mapper;Rotate:90'")
+    p.add_argument(
+        "--rgb-layout",
+        choices=("parallel-ports", "daisy-chain"),
+        default="parallel-ports",
+        help="rpi-rgb-led-matrix topology (default: one 64x32 panel per Triple Bonnet port)",
     )
     p.add_argument("--listen", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8080)
@@ -622,10 +803,12 @@ def main() -> None:
     inferred_addr_lines = infer_addr_lines(args.panel_height, args.panel_scan, args.addr_lines)
     print(
         f"[scoreboard] geometry={width}x{height} panel={args.panel_width}x{args.panel_height} "
-        f"scan={args.panel_scan} addr_lines={inferred_addr_lines} serpentine={args.serpentine} pinout={args.pinout}"
+        f"backend={args.backend} scan={args.panel_scan} addr_lines={inferred_addr_lines} "
+        f"serpentine={args.serpentine} pinout={args.pinout} "
+        f"rgb_layout={args.rgb_layout} rgb_multiplexing={args.rgb_multiplexing}"
     )
     print("[scoreboard] Default panel-scan is 1/8 for this repo. Use --panel-scan auto|1/16|1/32 or --addr-lines to match other panel types.")
-    display = PiomatterDisplay(
+    display = MatrixDisplay(
         width,
         height,
         args.bit_depth,
@@ -634,6 +817,15 @@ def main() -> None:
         inferred_addr_lines,
         args.serpentine,
         args.pinout,
+        args.backend,
+        args.rgb_gpio_mapping,
+        args.rgb_slowdown_gpio,
+        args.rgb_multiplexing,
+        args.rgb_row_addr_type,
+        args.rgb_chain_length,
+        args.rgb_parallel,
+        args.rgb_pixel_mapper,
+        args.rgb_layout,
     )
     renderer = MatrixRenderer(display, state)
     if args.test_pattern == "panel":

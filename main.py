@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.metadata
 import json
 import logging
 import threading
@@ -15,6 +16,40 @@ from PIL import Image, ImageDraw, ImageFont
 STATE_FILE = Path("scoreboard_state.json")
 MAX_TEAM_CHARS = 5
 LOGGER = logging.getLogger("scoreboard")
+
+
+def ensure_werkzeug_metadata_version() -> None:
+    """Keep Flask startup working if Werkzeug files exist without dist-info metadata.
+
+    Some Raspberry Pi installs can end up with an importable ``werkzeug`` package
+    but no ``werkzeug-*.dist-info`` directory. Werkzeug's development server only
+    uses that metadata to build its HTTP Server header, but it raises
+    ``PackageNotFoundError`` during startup if the metadata is missing. Patch just
+    that lookup so the scoreboard web controls still come up and log a repair hint.
+    """
+    try:
+        importlib.metadata.version("werkzeug")
+        return
+    except importlib.metadata.PackageNotFoundError:
+        pass
+
+    werkzeug = importlib.import_module("werkzeug")
+    fallback_version = getattr(werkzeug, "__version__", None) or "unknown"
+    original_version = importlib.metadata.version
+
+    def patched_version(distribution_name: str) -> str:
+        normalized_name = distribution_name.lower().replace("_", "-")
+        if normalized_name == "werkzeug":
+            return fallback_version
+        return original_version(distribution_name)
+
+    importlib.metadata.version = patched_version
+    LOGGER.warning(
+        "Werkzeug is importable, but its package metadata is missing; using fallback "
+        "version %r so the web UI can start. To repair the virtualenv, rerun the "
+        "installer or run: python -m pip install --force-reinstall -r requirements.txt",
+        fallback_version,
+    )
 
 
 @dataclass
@@ -869,6 +904,7 @@ def main() -> None:
     if args.init_only:
         LOGGER.info("--init-only set; exiting after successful matrix initialization and first draw")
         return
+    ensure_werkzeug_metadata_version()
     create_app(state, renderer).run(host=args.listen, port=args.port)
 
 

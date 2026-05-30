@@ -115,6 +115,17 @@ SCOREBOARD_STATE_FILE=/path/to/scoreboard_state.json python main.py
 
 The included systemd unit passes an explicit `/opt/scoreboard_3panel_pi5/scoreboard_state.json` path so persistence does not depend on the process working directory. If logs mention `Permission denied: '.'`, make sure the state directory is writable by the service user, or pre-create `scoreboard_state.json` with write permission for that user so the direct-write fallback can still persist changes.
 
+### Font file permission warnings
+
+If startup logs warnings such as `Unable to load matrix font ... Permission denied`, the app is running but Pillow cannot read the bundled BDF fonts, so the scoreboard falls back to Pillow's default font. Re-run the Pi installer to repair repository permissions, or run this from the repo directory on the Pi:
+
+```bash
+find "$PWD" -type d -exec chmod a+rx {} +
+find "$PWD/fonts" -type f -name '*.bdf' -exec chmod a+r {} +
+```
+
+Directories need the execute/traverse bit and the `.bdf` files need the read bit for whichever user starts `main.py` or the systemd service.
+
 ## Geometry and panel scan notes
 
 - Default display shape is 192x32 (3x panels across).

@@ -28,6 +28,13 @@ echo "Creating virtual environment at: $VENV_DIR"
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 
+echo "Ensuring bundled fonts are readable by the runtime service..."
+# The scoreboard process may run under sudo/systemd or a dedicated service user.
+# Keep the repository directories traversable and bundled BDF fonts readable so
+# Pillow can load the crisp matrix fonts instead of falling back to its default.
+find "$REPO_DIR" -type d -exec chmod a+rx {} +
+find "$REPO_DIR/fonts" -type f -name '*.bdf' -exec chmod a+r {} +
+
 python -m pip install --upgrade pip wheel setuptools
 python -m pip install -r "$REPO_DIR/requirements.txt"
 python -m pip install "git+$RGB_MATRIX_REPO"

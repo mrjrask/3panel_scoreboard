@@ -78,7 +78,7 @@ This Raspberry Pi/Triple Bonnet adaptation carries forward the manual baseball s
 - Balls (0-3), strikes (0-2), and outs (0-2), including baseball-style strikeout/out advancement and half-inning rollover after three outs.
 - Optional batting-order tracker per team with configurable lineup sizes from 1-20 batters and controls to advance/reset batters.
 - Full reset, plus score-only and count-only reset controls.
-- Automatic JSON state persistence after each change. State writes are flushed and fsynced before the atomic replace so recent web-control changes survive board resets/reboots and abrupt power loss as reliably as the underlying filesystem allows.
+- Automatic JSON state persistence after each change. State writes are flushed and fsynced before the atomic replace so recent web-control changes survive board resets/reboots and abrupt power loss as reliably as the underlying filesystem allows. If the service can update an existing state file but cannot create temporary files in the state directory, it falls back to an fsynced direct rewrite and logs a warning instead of losing every change.
 
 ## Web UI
 
@@ -103,6 +103,17 @@ sudo systemctl enable --now scoreboard.service
 ```
 
 For Pi 4 service installs, either rely on backend auto-detection or add `--backend rgbmatrix` plus any needed `--rgb-*` options to the `ExecStart` line.
+
+### State persistence path and permissions
+
+By default, the app reads and writes `scoreboard_state.json` in its working directory. You can choose a different writable location with either:
+
+```bash
+python main.py --state-file /path/to/scoreboard_state.json
+SCOREBOARD_STATE_FILE=/path/to/scoreboard_state.json python main.py
+```
+
+The included systemd unit passes an explicit `/opt/scoreboard_3panel_pi5/scoreboard_state.json` path so persistence does not depend on the process working directory. If logs mention `Permission denied: '.'`, make sure the state directory is writable by the service user, or pre-create `scoreboard_state.json` with write permission for that user so the direct-write fallback can still persist changes.
 
 ## Geometry and panel scan notes
 

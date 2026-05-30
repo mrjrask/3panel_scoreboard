@@ -156,6 +156,35 @@ class MatrixRendererColorTests(unittest.TestCase):
         self.assertEqual(draw_inning_line.call_args.args[7], (170, 187, 204))
         self.assertNotEqual(draw_inning_line.call_args.args[7], (68, 85, 102))
 
+    def test_inning_line_uses_half_size_label_before_half_and_inning(self):
+        renderer = self._renderer_with_colors()
+        image = main.Image.new("RGB", (64, 32), (0, 0, 0))
+        draw = main.ImageDraw.Draw(image)
+
+        with (
+            mock.patch.object(
+                renderer, "_draw_scaled_text", wraps=renderer._draw_scaled_text
+            ) as draw_scaled_text,
+            mock.patch.object(draw, "text", wraps=draw.text) as draw_text,
+        ):
+            renderer._draw_inning_line(
+                draw,
+                2,
+                1,
+                "7",
+                "TOP",
+                (119, 136, 153),
+                (170, 187, 204),
+                (170, 187, 204),
+            )
+
+        self.assertEqual(draw_scaled_text.call_args.args[2], "INN")
+        self.assertEqual(draw_scaled_text.call_args.args[4], 0.5)
+        text_calls = draw_text.call_args_list
+        self.assertEqual(text_calls[0].args[1], "TOP ")
+        self.assertEqual(text_calls[1].args[1], "7")
+        self.assertLess(text_calls[0].args[0][0], text_calls[1].args[0][0])
+
     def test_team_name_font_uses_native_bitmap_size(self):
         renderer = self._renderer_with_colors()
 

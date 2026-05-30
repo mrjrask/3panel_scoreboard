@@ -279,6 +279,33 @@ class ConfigRouteTests(unittest.TestCase):
         def draw(self):
             self.draw_calls += 1
 
+    def test_brightness_route_updates_slider_without_config_save(self):
+        state = main.ScoreboardState(brightness=70)
+        renderer = self.FakeRenderer()
+        app = main.create_app(state, renderer)
+
+        with mock.patch.object(main, "save_state") as save_state:
+            response = app.test_client().post("/brightness", data={"brightness": "42"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"brightness": 42})
+        self.assertEqual(state.brightness, 42)
+        self.assertEqual(renderer.draw_calls, 1)
+        save_state.assert_called_once_with(state)
+
+    def test_brightness_route_clamps_slider_value(self):
+        state = main.ScoreboardState(brightness=70)
+        renderer = self.FakeRenderer()
+        app = main.create_app(state, renderer)
+
+        with mock.patch.object(main, "save_state"):
+            response = app.test_client().post("/brightness", data={"brightness": "101"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"brightness": 100})
+        self.assertEqual(state.brightness, 100)
+        self.assertEqual(renderer.draw_calls, 1)
+
     def test_config_updates_brightness_from_slider(self):
         state = main.ScoreboardState(brightness=70)
         renderer = self.FakeRenderer()

@@ -1518,6 +1518,7 @@ label { display:block; margin:8px 0 6px; color:#c9d3e3; }
           </div>
           <label for='brightness'>Brightness: <span id='brightness-value'>{{s.brightness}}</span>%</label>
           <input id='brightness' type='range' name='brightness' value='{{s.brightness}}' min='5' max='100' step='1'
+                 data-brightness-url='{{url_for("brightness")}}'
                  oninput="document.getElementById('brightness-value').textContent = this.value">
           <div class='inline'><input type='checkbox' name='batting_order_enabled' value='1' {% if s.batting_order_enabled %}checked{% endif %}><label style='margin:0;'>Show batting-order tracker</label></div>
           <div class='formgrid'>
@@ -1583,6 +1584,62 @@ label { display:block; margin:8px 0 6px; color:#c9d3e3; }
     });
   }
 
+  function bindBrightnessSlider() {
+    const slider = document.getElementById('brightness');
+    const valueLabel = document.getElementById('brightness-value');
+    if (!slider || !valueLabel || slider.disabled) {
+      return;
+    }
+
+    let saveTimer = null;
+    let controller = null;
+
+    function sendBrightness() {
+      if (controller) {
+        controller.abort();
+      }
+      controller = new AbortController();
+      const formData = new FormData();
+      formData.set('brightness', slider.value);
+      fetch(slider.dataset.brightnessUrl, {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'fetch' },
+        signal: controller.signal,
+      })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`);
+          }
+          return response.json();
+        })
+        .then((data) => {
+          if (Object.prototype.hasOwnProperty.call(data, 'brightness')) {
+            slider.value = data.brightness;
+            valueLabel.textContent = data.brightness;
+          }
+        })
+        .catch((error) => {
+          if (error.name !== 'AbortError') {
+            console.error(error);
+          }
+        });
+    }
+
+    slider.addEventListener('input', () => {
+      valueLabel.textContent = slider.value;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(sendBrightness, 120);
+    });
+
+    slider.addEventListener('change', () => {
+      valueLabel.textContent = slider.value;
+      clearTimeout(saveTimer);
+      sendBrightness();
+    });
+  }
+
   function bindAjaxForms() {
     document.querySelectorAll('form[method="post"]').forEach((form) => {
       form.addEventListener('submit', async (event) => {
@@ -1616,6 +1673,7 @@ label { display:block; margin:8px 0 6px; color:#c9d3e3; }
           currentContainer.replaceWith(newContainer);
           applySectionState(sectionState);
           bindSectionToggles();
+          bindBrightnessSlider();
           bindAjaxForms();
           window.scrollTo(scrollPosition.x, scrollPosition.y);
         } catch (error) {
@@ -1628,6 +1686,7 @@ label { display:block; margin:8px 0 6px; color:#c9d3e3; }
 
   applySectionState(getStoredSectionState());
   bindSectionToggles();
+  bindBrightnessSlider();
   bindAjaxForms();
 })();
 </script>
@@ -1708,6 +1767,16 @@ def create_app(state: ScoreboardState, renderer: MatrixRenderer) -> Flask:
             save_state(state)
             renderer.draw()
         return redirect("/")
+
+    @app.post("/brightness")
+    def brightness():
+        with state_lock:
+            if state.locked:
+                return jsonify({"brightness": state.brightness, "locked": True}), 423
+            state.set_brightness(request.form.get("brightness", state.brightness))
+            save_state(state)
+            renderer.draw()
+            return jsonify({"brightness": state.brightness})
 
     @app.post("/config")
     def config():

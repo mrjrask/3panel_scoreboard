@@ -1100,7 +1100,7 @@ class MatrixRenderer:
                         self._draw_batting_order(
                             draw,
                             2,
-                            self._batting_order_y(team, team_y),
+                            self._batting_order_y(team, y + 1),
                             lineup,
                             batter,
                             colors[name_key],
@@ -1296,8 +1296,9 @@ class MatrixRenderer:
         colors: dict[str, tuple[int, int, int]],
         dim: tuple[int, int, int],
     ) -> None:
+        team_y = 1
         self._draw_scaled_text(
-            draw, (x + 2, 1), team, colors[name_key], TEAM_NAME_FONT_SCALE
+            draw, (x + 2, team_y), team, colors[name_key], TEAM_NAME_FONT_SCALE
         )
         if self.state.batting_order_enabled:
             self._draw_batting_order(
@@ -1319,6 +1320,10 @@ class MatrixRenderer:
             colors[score_key],
             SCORE_FONT_SCALE,
         )
+
+    def _batting_order_y(self, team: str, team_y: int) -> int:
+        _, team_height = self._scaled_text_size(team, TEAM_NAME_FONT_SCALE)
+        return team_y + team_height + 2
 
     def _draw_batting_order(
         self,

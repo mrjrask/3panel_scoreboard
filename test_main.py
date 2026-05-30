@@ -177,41 +177,36 @@ class MatrixRendererColorTests(unittest.TestCase):
             draw_team_name.call_args_list[1].args[2], renderer.state.team_b
         )
 
-    def test_horizontal_batting_order_is_drawn_below_team_name(self):
+    def test_horizontal_batting_order_is_drawn_at_screen_bottom(self):
         renderer = self._renderer_with_colors()
 
         with mock.patch.object(renderer, "_draw_batting_order") as draw_batting_order:
             renderer.draw_mode()
 
         first_call = draw_batting_order.call_args_list[0].args
-        self.assertEqual(
-            first_call[2], renderer._batting_order_y(renderer.state.team_a, 1)
-        )
-        self.assertGreater(first_call[2], 10)
+        self.assertEqual(first_call[2], renderer.display.height - 1)
 
-    def test_vertical_batting_order_is_drawn_below_team_name(self):
+    def test_vertical_batting_order_is_drawn_at_team_panel_bottom(self):
         renderer = self._renderer_with_colors(width=64, height=96)
 
         with mock.patch.object(renderer, "_draw_batting_order") as draw_batting_order:
             renderer.draw_mode()
 
         first_call = draw_batting_order.call_args_list[0].args
-        self.assertEqual(
-            first_call[2], renderer._batting_order_y(renderer.state.team_a, 1)
-        )
-        self.assertGreater(first_call[2], 10)
+        self.assertEqual(first_call[2], 31)
 
-    def test_score_uses_native_score_font_size(self):
+    def test_score_uses_double_native_score_font_size(self):
         renderer = self._renderer_with_colors()
         score_bbox = renderer.score_font.getbbox("99")
+        native_size = (score_bbox[2] - score_bbox[0], score_bbox[3] - score_bbox[1])
 
         self.assertEqual(
             renderer._score_text_size("99"),
-            (score_bbox[2] - score_bbox[0], score_bbox[3] - score_bbox[1]),
+            (native_size[0] * main.SCORE_SCALE, native_size[1] * main.SCORE_SCALE),
         )
-        self.assertEqual(renderer._score_text_size("99"), (18, 15))
+        self.assertEqual(renderer._score_text_size("99"), (36, 30))
 
-    def test_score_draw_does_not_use_scaled_text_resampling(self):
+    def test_score_draw_uses_doubled_score_text_not_generic_scaled_text(self):
         renderer = self._renderer_with_colors()
         renderer.state.score_a = 12
         renderer.state.score_b = 9

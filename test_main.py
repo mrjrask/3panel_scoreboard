@@ -181,5 +181,49 @@ class MatrixRendererColorTests(unittest.TestCase):
         self.assertGreater(first_call[2], 10)
 
 
+class ScoreboardStateLimitTests(unittest.TestCase):
+    def test_inning_clamps_to_twenty(self):
+        state = main.ScoreboardState(inning=25)
+        state.clamp()
+
+        self.assertEqual(state.inning, 20)
+
+    def test_inning_increment_stops_at_twenty(self):
+        state = main.ScoreboardState(inning=20)
+        state.update("inning_inc")
+
+        self.assertEqual(state.inning, 20)
+
+
+class ConfigRouteTests(unittest.TestCase):
+    class FakeRenderer:
+        def __init__(self):
+            self.draw_calls = 0
+
+        def draw(self):
+            self.draw_calls += 1
+
+    def test_config_updates_brightness_from_slider(self):
+        state = main.ScoreboardState(brightness=70)
+        renderer = self.FakeRenderer()
+        app = main.create_app(state, renderer)
+
+        payload = {key: value for key, value in state.text_colors.items()}
+        payload.update(
+            {
+                "brightness": "42",
+                "batting_order_enabled": "1",
+                "batting_order_a": str(state.batting_order_a),
+                "batting_order_b": str(state.batting_order_b),
+            }
+        )
+        with mock.patch.object(main, "save_state"):
+            response = app.test_client().post("/config", data=payload)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(state.brightness, 42)
+        self.assertEqual(renderer.draw_calls, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -945,14 +945,15 @@ class MatrixRenderer:
                     if self.state.inning_half == "top"
                     else colors["team_b_name"]
                 )
-                draw.text(
-                    (2, y + 2), "INN", fill=colors["inning_label"], font=self.font
-                )
-                draw.text(
-                    (25, y + 2),
-                    f"{half} {self.state.inning}",
-                    fill=half_color,
-                    font=self.font,
+                self._draw_inning_line(
+                    draw,
+                    2,
+                    y + 2,
+                    str(self.state.inning),
+                    half,
+                    colors["inning_label"],
+                    colors["inning_value"],
+                    half_color,
                 )
                 draw.text(
                     (2, y + 16),
@@ -998,16 +999,16 @@ class MatrixRenderer:
                     else colors["team_b_name"]
                 )
                 info_x = panel_w * 2 + 2
-                draw.text(
-                    (info_x, 1), "INN", fill=colors["inning_label"], font=self.font
-                )
-                draw.text(
-                    (info_x + 24, 1),
+                self._draw_inning_line(
+                    draw,
+                    info_x,
+                    1,
                     str(self.state.inning),
-                    fill=colors["inning_value"],
-                    font=self.font,
+                    half,
+                    colors["inning_label"],
+                    colors["inning_value"],
+                    half_color,
                 )
-                draw.text((info_x, 10), half, fill=half_color, font=self.font)
                 self._draw_count_dots(
                     draw,
                     info_x,
@@ -1042,6 +1043,29 @@ class MatrixRenderer:
                     dim,
                 )
             self.display.show(image, self.state.brightness)
+
+    def _draw_inning_line(
+        self,
+        draw: ImageDraw.ImageDraw,
+        x: int,
+        y: int,
+        inning: str,
+        half: str,
+        label_color: tuple[int, int, int],
+        value_color: tuple[int, int, int],
+        half_color: tuple[int, int, int],
+    ) -> None:
+        inning_label = "INN "
+        half_label = f" {half}"
+        draw.text((x, y), inning_label, fill=label_color, font=self.font)
+        inning_x = x + self._text_width(inning_label)
+        draw.text((inning_x, y), inning, fill=value_color, font=self.font)
+        half_x = inning_x + self._text_width(inning)
+        draw.text((half_x, y), half_label, fill=half_color, font=self.font)
+
+    def _text_width(self, text: str) -> int:
+        bbox = self.font.getbbox(text)
+        return bbox[2] - bbox[0]
 
     def _draw_team_panel(
         self,

@@ -1258,13 +1258,25 @@ class MatrixRenderer:
         value_color: tuple[int, int, int],
         half_color: tuple[int, int, int],
     ) -> None:
-        inning_label = "INN "
-        half_label = f" {half}"
-        draw.text((x, y), inning_label, fill=label_color, font=self.font)
-        inning_x = x + self._text_width(inning_label)
-        draw.text((inning_x, y), inning, fill=value_color, font=self.font)
-        half_x = inning_x + self._text_width(inning)
+        inning_label = "INN"
+        label_scale = 0.5
+        label_gap = 1
+        half_label = f"{half} "
+        label_width, label_height = self._scaled_text_size(inning_label, label_scale)
+        _, line_height = self._font_text_size(half_label + inning, self.font)
+        label_y = y + max(0, (line_height - label_height) // 2)
+
+        self._draw_scaled_text(
+            draw,
+            (x, label_y),
+            inning_label,
+            label_color,
+            label_scale,
+        )
+        half_x = x + label_width + label_gap
         draw.text((half_x, y), half_label, fill=half_color, font=self.font)
+        inning_x = half_x + self._text_width(half_label)
+        draw.text((inning_x, y), inning, fill=value_color, font=self.font)
 
     def _text_width(self, text: str) -> int:
         width, _ = self._font_text_size(text, self.font)

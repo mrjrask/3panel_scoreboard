@@ -21,10 +21,13 @@ DEFAULT_STATE_FILE = Path("scoreboard_state.json")
 STATE_FILE = Path(os.environ.get("SCOREBOARD_STATE_FILE", DEFAULT_STATE_FILE))
 FONT_FILE = Path(__file__).resolve().parent / "fonts" / "6x10.bdf"
 FONT_PIXEL_SIZE = 10
+# Use a native smaller bitmap font for team names instead of fractional
+# downscaling, which can drop pixel rows/columns from glyphs.
+TEAM_NAME_FONT_FILE = Path(__file__).resolve().parent / "fonts" / "5x8.bdf"
+TEAM_NAME_FONT_PIXEL_SIZE = 8
 
 MAX_TEAM_CHARS = 10
 MAX_INNINGS = 20
-TEAM_NAME_FONT_SCALE = 0.8
 SCORE_FONT_SCALE = 1.6
 DEFAULT_TEXT_COLORS = {
     "team_a_name": "#FFFFFF",
@@ -458,14 +461,19 @@ def save_state(state: ScoreboardState) -> None:
         )
 
 
-def load_scoreboard_font() -> ImageFont.ImageFont:
+def load_scoreboard_font(
+    font_file: Path = FONT_FILE,
+    pixel_size: int = FONT_PIXEL_SIZE,
+    description: str = "matrix",
+) -> ImageFont.ImageFont:
     """Load a crisp bitmap font for low-resolution RGB matrix text."""
     try:
-        return ImageFont.truetype(FONT_FILE, FONT_PIXEL_SIZE)
+        return ImageFont.truetype(font_file, pixel_size)
     except OSError as exc:
         LOGGER.warning(
-            "Unable to load matrix font %s: %s; falling back to Pillow default font",
-            FONT_FILE,
+            "Unable to load %s font %s: %s; falling back to Pillow default font",
+            description,
+            font_file,
             exc,
         )
         return ImageFont.load_default()
@@ -1059,6 +1067,9 @@ class MatrixRenderer:
         self.state = state
         self.lock = threading.Lock()
         self.font = load_scoreboard_font()
+        self.team_name_font = load_scoreboard_font(
+            TEAM_NAME_FONT_FILE, TEAM_NAME_FONT_PIXEL_SIZE, "team-name"
+        )
 
     def draw(self) -> None:
         self.draw_mode("scoreboard")
@@ -1093,9 +1104,7 @@ class MatrixRenderer:
                     batter: int,
                     lineup: int,
                 ):
-                    self._draw_scaled_text(
-                        draw, (2, y + 1), team, colors[name_key], TEAM_NAME_FONT_SCALE
-                    )
+                    self._draw_team_name(draw, (2, y + 1), team, colors[name_key])
                     if self.state.batting_order_enabled:
                         self._draw_batting_order(
                             draw,
@@ -1254,8 +1263,28 @@ class MatrixRenderer:
         draw.text((half_x, y), half_label, fill=half_color, font=self.font)
 
     def _text_width(self, text: str) -> int:
-        bbox = self.font.getbbox(text)
-        return bbox[2] - bbox[0]
+        width, _ = self._font_text_size(text, self.font)
+        return width
+
+    def _font_text_size(
+        self, text: str, font: ImageFont.ImageFont
+    ) -> tuple[int, int]:
+        bbox = font.getbbox(text)
+        width = max(1, bbox[2] - bbox[0])
+        height = max(1, bbox[3] - bbox[1])
+        return width, height
+
+    def _team_name_size(self, text: str) -> tuple[int, int]:
+        return self._font_text_size(text, self.team_name_font)
+
+    def _draw_team_name(
+        self,
+        draw: ImageDraw.ImageDraw,
+        xy: tuple[int, int],
+        text: str,
+        fill: tuple[int, int, int],
+    ) -> None:
+        draw.text(xy, text, fill=fill, font=self.team_name_font)
 
     def _scaled_text_size(self, text: str, scale: float) -> tuple[int, int]:
         bbox = self.font.getbbox(text)
@@ -1297,9 +1326,7 @@ class MatrixRenderer:
         dim: tuple[int, int, int],
     ) -> None:
         team_y = 1
-        self._draw_scaled_text(
-            draw, (x + 2, team_y), team, colors[name_key], TEAM_NAME_FONT_SCALE
-        )
+        self._draw_team_name(draw, (x + 2, team_y), team, colors[name_key])
         if self.state.batting_order_enabled:
             self._draw_batting_order(
                 draw,
@@ -1322,7 +1349,7 @@ class MatrixRenderer:
         )
 
     def _batting_order_y(self, team: str, team_y: int) -> int:
-        _, team_height = self._scaled_text_size(team, TEAM_NAME_FONT_SCALE)
+        _, team_height = self._team_name_size(team)
         return team_y + team_height + 2
 
     def _draw_batting_order(

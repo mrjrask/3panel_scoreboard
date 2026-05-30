@@ -15,9 +15,12 @@ from pathlib import Path
 from flask import Flask, jsonify, redirect, render_template_string, request
 from PIL import Image, ImageDraw, ImageFont
 
-STATE_FILE = Path("scoreboard_state.json")
+
+DEFAULT_STATE_FILE = Path("scoreboard_state.json")
+STATE_FILE = Path(os.environ.get("SCOREBOARD_STATE_FILE", DEFAULT_STATE_FILE))
 FONT_FILE = Path(__file__).resolve().parent / "fonts" / "6x10.bdf"
 FONT_PIXEL_SIZE = 10
+
 MAX_TEAM_CHARS = 10
 DEFAULT_TEXT_COLORS = {
     "team_a_name": "#FFFFFF",
@@ -206,6 +209,12 @@ class ScoreboardState:
         self.clamp()
 
 
+def set_state_file(path: str | Path) -> None:
+    """Configure where scoreboard state is loaded from and saved to."""
+    global STATE_FILE
+    STATE_FILE = Path(path).expanduser()
+
+
 def load_state() -> ScoreboardState:
     if STATE_FILE.exists():
         try:
@@ -233,21 +242,48 @@ def _restore_sudo_user_ownership(path: Path) -> None:
         LOGGER.debug("Could not update ownership for %s: %s", path, exc)
 
 
+def _state_parent() -> Path:
+    return STATE_FILE.parent if STATE_FILE.parent != Path("") else Path(".")
+
+
+def _write_state_file_directly(state_payload: str) -> None:
+    """Best-effort fallback for directories that cannot create temp files.
+
+    Atomic replace needs write permission on the state directory. Some service
+    deployments can still have an existing writable ``scoreboard_state.json``
+    while the containing directory denies temporary-file creation. In that case,
+    directly rewrite and fsync the existing state file so controls keep persisting
+    instead of failing every save.
+    """
+    if not STATE_FILE.exists():
+        raise FileNotFoundError(STATE_FILE)
+
+    with STATE_FILE.open("w", encoding="utf-8") as state_file:
+        state_file.write(state_payload)
+        state_file.write("\n")
+        state_file.flush()
+        os.fsync(state_file.fileno())
+    _restore_sudo_user_ownership(STATE_FILE)
+
+
 def save_state(state: ScoreboardState) -> None:
     """Persist scoreboard state without reusing stale temporary files.
 
     Older runs could leave ``scoreboard_state.tmp`` behind with permissions that
-    prevented the next web action from opening it.  Create a unique temporary
-    file in the same directory instead, then atomically replace the JSON state.
+    prevented the next web action from opening it. Create a unique temporary file
+    in the same directory instead, then atomically replace the JSON state. If the
+    directory blocks temporary-file creation but the existing state file itself is
+    writable, fall back to an fsynced direct rewrite so persistence keeps working.
     If persistence is still blocked by filesystem permissions, keep the in-memory
     scoreboard responsive and log the repair hint instead of returning HTTP 500.
     """
     state_payload = json.dumps(asdict(state))
-    state_dir = STATE_FILE.parent if STATE_FILE.parent != Path("") else Path(".")
+    state_dir = _state_parent()
     tmp_path: Path | None = None
 
     try:
-        state_dir.mkdir(parents=True, exist_ok=True)
+        if state_dir != Path("."):
+            state_dir.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
             prefix=f"{STATE_FILE.stem}.",
             suffix=".tmp",
@@ -264,7 +300,7 @@ def save_state(state: ScoreboardState) -> None:
         tmp_path.replace(STATE_FILE)
         _restore_sudo_user_ownership(STATE_FILE)
         try:
-            dir_fd = os.open(state_dir, os.O_RDONLY)
+            dir_fd = os.open(state_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
             try:
                 os.fsync(dir_fd)
             finally:
@@ -277,14 +313,28 @@ def save_state(state: ScoreboardState) -> None:
                 tmp_path.unlink(missing_ok=True)
             except OSError:
                 pass
-        LOGGER.error(
-            "Unable to save scoreboard state to %s: %s. Controls will keep working "
-            "for this run, but changes will not persist. Check ownership of the "
-            "repo directory and remove any stale %s files if needed.",
-            STATE_FILE,
-            exc,
-            STATE_FILE.with_suffix(".tmp"),
-        )
+        try:
+            _write_state_file_directly(state_payload)
+            LOGGER.warning(
+                "Saved scoreboard state directly to %s after atomic save failed: %s. "
+                "For the safest persistence, make the state directory writable by "
+                "the scoreboard service.",
+                STATE_FILE,
+                exc,
+            )
+            return
+        except OSError as fallback_exc:
+            LOGGER.error(
+                "Unable to save scoreboard state to %s: atomic save failed: %s; "
+                "direct save failed: %s. Controls will keep working for this run, "
+                "but changes will not persist. Check ownership of the state file "
+                "and directory, or start with --state-file /path/to/writable/file. "
+                "Remove any stale %s.*.tmp files if needed.",
+                STATE_FILE,
+                exc,
+                fallback_exc,
+                STATE_FILE.stem,
+            )
 
 
 def load_scoreboard_font() -> ImageFont.ImageFont:
@@ -1436,6 +1486,11 @@ def parse_args() -> argparse.Namespace:
         default="parallel-ports",
         help="rpi-rgb-led-matrix topology (default: one 64x32 panel per Triple Bonnet port)",
     )
+    p.add_argument(
+        "--state-file",
+        default=os.environ.get("SCOREBOARD_STATE_FILE", str(DEFAULT_STATE_FILE)),
+        help="JSON file used for persistent scoreboard state (default: scoreboard_state.json, or SCOREBOARD_STATE_FILE)",
+    )
     p.add_argument("--listen", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument(
@@ -1457,6 +1512,7 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
     )
     args = parse_args()
+    set_state_file(args.state_file)
     state = load_state()
     state.brightness = args.brightness
     width = args.panel_width * args.chain_across

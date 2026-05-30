@@ -1024,11 +1024,7 @@ class MatrixRenderer:
                 )
                 y = panel_h * 2
                 half = "TOP" if self.state.inning_half == "top" else "BOT"
-                half_color = (
-                    colors["team_a_name"]
-                    if self.state.inning_half == "top"
-                    else colors["team_b_name"]
-                )
+                half_color = colors["inning_value"]
                 self._draw_inning_line(
                     draw,
                     2,
@@ -1077,11 +1073,7 @@ class MatrixRenderer:
                     colors,
                     dim,
                 )
-                half_color = (
-                    colors["team_a_name"]
-                    if self.state.inning_half == "top"
-                    else colors["team_b_name"]
-                )
+                half_color = colors["inning_value"]
                 info_x = panel_w * 2 + 2
                 self._draw_inning_line(
                     draw,

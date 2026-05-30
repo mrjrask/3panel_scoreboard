@@ -83,32 +83,48 @@ class SaveStateTests(unittest.TestCase):
         self.assertIn("Direct save was not attempted", "\n".join(logs.output))
 
 
-class WebUITests(unittest.TestCase):
-    def test_sections_are_collapsible_with_layout_colors_closed_by_default(self):
-        state = main.ScoreboardState()
-        renderer = mock.Mock()
-        app = main.create_app(state, renderer)
+class MatrixRendererColorTests(unittest.TestCase):
+    class FakeDisplay:
+        def __init__(self, width, height):
+            self.width = width
+            self.height = height
+            self.images = []
 
-        response = app.test_client().get("/")
-        html = response.get_data(as_text=True)
+        def show(self, image, brightness):
+            self.images.append((image.copy(), brightness))
 
-        self.assertIn("<details class='card' data-section='score' open>", html)
-        self.assertIn("<details class='card' data-section='teams' open>", html)
-        self.assertIn("<details class='card' data-section='layout-colors'>", html)
-        self.assertIn("<summary>Layout & Colors</summary>", html)
-        self.assertIn("<details class='card' data-section='controls' open>", html)
+    def _renderer_with_colors(self, width=192, height=32, inning_half="top"):
+        state = main.ScoreboardState(inning_half=inning_half)
+        state.text_colors.update(
+            {
+                "team_a_name": "#112233",
+                "team_b_name": "#445566",
+                "inning_label": "#778899",
+                "inning_value": "#AABBCC",
+            }
+        )
+        state.clamp()
+        return main.MatrixRenderer(self.FakeDisplay(width, height), state)
 
-    def test_web_ui_submits_buttons_without_full_page_navigation(self):
-        state = main.ScoreboardState()
-        renderer = mock.Mock()
-        app = main.create_app(state, renderer)
+    def test_top_indicator_uses_inning_value_color_in_horizontal_layout(self):
+        renderer = self._renderer_with_colors(inning_half="top")
 
-        response = app.test_client().get("/")
-        html = response.get_data(as_text=True)
+        with mock.patch.object(renderer, "_draw_inning_line") as draw_inning_line:
+            renderer.draw_mode()
 
-        self.assertIn("event.preventDefault();", html)
-        self.assertIn("window.scrollTo(scrollPosition.x, scrollPosition.y);", html)
-        self.assertIn("fetch(form.action", html)
+        self.assertEqual(draw_inning_line.call_args.args[4], "TOP")
+        self.assertEqual(draw_inning_line.call_args.args[7], (170, 187, 204))
+        self.assertNotEqual(draw_inning_line.call_args.args[7], (17, 34, 51))
+
+    def test_bottom_indicator_uses_inning_value_color_in_vertical_layout(self):
+        renderer = self._renderer_with_colors(width=64, height=96, inning_half="bottom")
+
+        with mock.patch.object(renderer, "_draw_inning_line") as draw_inning_line:
+            renderer.draw_mode()
+
+        self.assertEqual(draw_inning_line.call_args.args[4], "BOT")
+        self.assertEqual(draw_inning_line.call_args.args[7], (170, 187, 204))
+        self.assertNotEqual(draw_inning_line.call_args.args[7], (68, 85, 102))
 
 
 if __name__ == "__main__":

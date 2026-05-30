@@ -156,6 +156,27 @@ class MatrixRendererColorTests(unittest.TestCase):
         self.assertEqual(draw_inning_line.call_args.args[7], (170, 187, 204))
         self.assertNotEqual(draw_inning_line.call_args.args[7], (68, 85, 102))
 
+    def test_team_name_font_uses_native_bitmap_size(self):
+        renderer = self._renderer_with_colors()
+
+        self.assertEqual(renderer._team_name_size("AWAY TEAM"), (45, 8))
+        self.assertLess(
+            renderer._team_name_size("AWAY TEAM")[0], renderer._text_width("AWAY TEAM")
+        )
+
+    def test_horizontal_team_name_uses_dedicated_font_without_resampling(self):
+        renderer = self._renderer_with_colors()
+
+        with mock.patch.object(renderer, "_draw_team_name") as draw_team_name:
+            renderer.draw_mode()
+
+        self.assertEqual(
+            draw_team_name.call_args_list[0].args[2], renderer.state.team_a
+        )
+        self.assertEqual(
+            draw_team_name.call_args_list[1].args[2], renderer.state.team_b
+        )
+
     def test_horizontal_batting_order_is_drawn_below_team_name(self):
         renderer = self._renderer_with_colors()
 

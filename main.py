@@ -1103,9 +1103,7 @@ class MatrixRenderer:
                     batter: int,
                     lineup: int,
                 ):
-                    self._draw_scaled_text(
-                        draw, (2, y + 1), team, colors[name_key], TEAM_NAME_FONT_SCALE
-                    )
+                    self._draw_team_name(draw, (2, y + 1), team, colors[name_key])
                     if self.state.batting_order_enabled:
                         self._draw_batting_order(
                             draw,
@@ -1261,8 +1259,28 @@ class MatrixRenderer:
         draw.text((half_x, y), half_label, fill=half_color, font=self.font)
 
     def _text_width(self, text: str) -> int:
-        bbox = self.font.getbbox(text)
-        return bbox[2] - bbox[0]
+        width, _ = self._font_text_size(text, self.font)
+        return width
+
+    def _font_text_size(
+        self, text: str, font: ImageFont.ImageFont
+    ) -> tuple[int, int]:
+        bbox = font.getbbox(text)
+        width = max(1, bbox[2] - bbox[0])
+        height = max(1, bbox[3] - bbox[1])
+        return width, height
+
+    def _team_name_size(self, text: str) -> tuple[int, int]:
+        return self._font_text_size(text, self.team_name_font)
+
+    def _draw_team_name(
+        self,
+        draw: ImageDraw.ImageDraw,
+        xy: tuple[int, int],
+        text: str,
+        fill: tuple[int, int, int],
+    ) -> None:
+        draw.text(xy, text, fill=fill, font=self.team_name_font)
 
     def _scaled_text_size(self, text: str, scale: float) -> tuple[int, int]:
         bbox = self.font.getbbox(text)
@@ -1319,9 +1337,7 @@ class MatrixRenderer:
         dim: tuple[int, int, int],
     ) -> None:
         team_y = 1
-        self._draw_scaled_text(
-            draw, (x + 2, team_y), team, colors[name_key], TEAM_NAME_FONT_SCALE
-        )
+        self._draw_team_name(draw, (x + 2, team_y), team, colors[name_key])
         if self.state.batting_order_enabled:
             self._draw_batting_order(
                 draw,
@@ -1343,7 +1359,7 @@ class MatrixRenderer:
         )
 
     def _batting_order_y(self, team: str, team_y: int) -> int:
-        _, team_height = self._scaled_text_size(team, TEAM_NAME_FONT_SCALE)
+        _, team_height = self._team_name_size(team)
         return team_y + team_height + 2
 
     def _draw_batting_order(

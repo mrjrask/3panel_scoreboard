@@ -224,7 +224,7 @@ class MatrixRendererColorTests(unittest.TestCase):
         first_call = draw_batting_order.call_args_list[0].args
         self.assertEqual(first_call[2], 31)
 
-    def test_score_uses_double_native_score_font_size(self):
+    def test_score_uses_next_larger_double_native_score_font_size(self):
         renderer = self._renderer_with_colors()
         score_bbox = renderer.score_font.getbbox("99")
         native_size = (score_bbox[2] - score_bbox[0], score_bbox[3] - score_bbox[1])
@@ -233,7 +233,7 @@ class MatrixRendererColorTests(unittest.TestCase):
             renderer._score_text_size("99"),
             (native_size[0] * main.SCORE_SCALE, native_size[1] * main.SCORE_SCALE),
         )
-        self.assertEqual(renderer._score_text_size("99"), (36, 30))
+        self.assertEqual(renderer._score_text_size("99"), (36, 36))
 
     def test_score_draw_uses_doubled_score_text_not_generic_scaled_text(self):
         renderer = self._renderer_with_colors()

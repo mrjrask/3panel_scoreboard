@@ -47,5 +47,49 @@ class SaveStateTests(unittest.TestCase):
         self.assertEqual(saved["score_b"], 4)
 
 
+class MatrixRendererColorTests(unittest.TestCase):
+    class FakeDisplay:
+        def __init__(self, width, height):
+            self.width = width
+            self.height = height
+            self.images = []
+
+        def show(self, image, brightness):
+            self.images.append((image.copy(), brightness))
+
+    def _renderer_with_colors(self, width=192, height=32, inning_half="top"):
+        state = main.ScoreboardState(inning_half=inning_half)
+        state.text_colors.update(
+            {
+                "team_a_name": "#112233",
+                "team_b_name": "#445566",
+                "inning_label": "#778899",
+                "inning_value": "#AABBCC",
+            }
+        )
+        state.clamp()
+        return main.MatrixRenderer(self.FakeDisplay(width, height), state)
+
+    def test_top_indicator_uses_inning_value_color_in_horizontal_layout(self):
+        renderer = self._renderer_with_colors(inning_half="top")
+
+        with mock.patch.object(renderer, "_draw_inning_line") as draw_inning_line:
+            renderer.draw_mode()
+
+        self.assertEqual(draw_inning_line.call_args.args[4], "TOP")
+        self.assertEqual(draw_inning_line.call_args.args[7], (170, 187, 204))
+        self.assertNotEqual(draw_inning_line.call_args.args[7], (17, 34, 51))
+
+    def test_bottom_indicator_uses_inning_value_color_in_vertical_layout(self):
+        renderer = self._renderer_with_colors(width=64, height=96, inning_half="bottom")
+
+        with mock.patch.object(renderer, "_draw_inning_line") as draw_inning_line:
+            renderer.draw_mode()
+
+        self.assertEqual(draw_inning_line.call_args.args[4], "BOT")
+        self.assertEqual(draw_inning_line.call_args.args[7], (170, 187, 204))
+        self.assertNotEqual(draw_inning_line.call_args.args[7], (68, 85, 102))
+
+
 if __name__ == "__main__":
     unittest.main()

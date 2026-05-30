@@ -113,6 +113,31 @@ class SaveStateTests(unittest.TestCase):
         self.assertIn("Saved this and future changes", "\n".join(logs.output))
 
 
+class MatrixFontLoadingTests(unittest.TestCase):
+    def test_load_matrix_font_uses_bdf_parser_for_bdf_fonts(self):
+        with mock.patch.object(
+            main.ImageFont,
+            "truetype",
+            side_effect=OSError("cannot open resource"),
+        ) as truetype:
+            font = main.load_matrix_font(main.FONT_FILE, main.FONT_PIXEL_SIZE)
+
+        truetype.assert_not_called()
+        self.assertEqual(font.getbbox("ABC"), (0, 0, 18, 10))
+
+    def test_load_matrix_font_falls_back_only_when_bdf_parser_fails(self):
+        with (
+            tempfile.NamedTemporaryFile(suffix=".bdf") as font_file,
+            self.assertLogs(main.LOGGER, level="WARNING") as logs,
+        ):
+            Path(font_file.name).write_text("not a bdf font")
+
+            font = main.load_matrix_font(Path(font_file.name), 10)
+
+        self.assertEqual(len(font.getbbox("ABC")), 4)
+        self.assertIn("Unable to load matrix font", "\n".join(logs.output))
+
+
 class MatrixRendererColorTests(unittest.TestCase):
     class FakeDisplay:
         def __init__(self, width, height):

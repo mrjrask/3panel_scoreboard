@@ -180,6 +180,37 @@ class MatrixRendererColorTests(unittest.TestCase):
         )
         self.assertGreater(first_call[2], 10)
 
+    def test_score_uses_native_score_font_size(self):
+        renderer = self._renderer_with_colors()
+        score_bbox = renderer.score_font.getbbox("99")
+
+        self.assertEqual(
+            renderer._score_text_size("99"),
+            (score_bbox[2] - score_bbox[0], score_bbox[3] - score_bbox[1]),
+        )
+        self.assertEqual(renderer._score_text_size("99"), (18, 15))
+
+    def test_score_draw_does_not_use_scaled_text_resampling(self):
+        renderer = self._renderer_with_colors()
+        renderer.state.score_a = 12
+        renderer.state.score_b = 9
+
+        with (
+            mock.patch.object(
+                renderer, "_draw_scaled_text", wraps=renderer._draw_scaled_text
+            ) as draw_scaled_text,
+            mock.patch.object(
+                renderer, "_draw_score_text", wraps=renderer._draw_score_text
+            ) as draw_score_text,
+        ):
+            renderer.draw_mode()
+
+        scaled_text_values = [call.args[2] for call in draw_scaled_text.call_args_list]
+        score_text_values = [call.args[2] for call in draw_score_text.call_args_list]
+        self.assertNotIn("12", scaled_text_values)
+        self.assertNotIn("9", scaled_text_values)
+        self.assertEqual(score_text_values, ["12", "9"])
+
 
 class ScoreboardStateLimitTests(unittest.TestCase):
     def test_inning_clamps_to_twenty(self):

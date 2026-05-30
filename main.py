@@ -16,6 +16,8 @@ from flask import Flask, jsonify, redirect, render_template_string, request
 from PIL import Image, ImageDraw, ImageFont
 
 STATE_FILE = Path("scoreboard_state.json")
+FONT_FILE = Path(__file__).resolve().parent / "fonts" / "6x10.bdf"
+FONT_PIXEL_SIZE = 10
 MAX_TEAM_CHARS = 10
 DEFAULT_TEXT_COLORS = {
     "team_a_name": "#FFFFFF",
@@ -283,6 +285,19 @@ def save_state(state: ScoreboardState) -> None:
             exc,
             STATE_FILE.with_suffix(".tmp"),
         )
+
+
+def load_scoreboard_font() -> ImageFont.ImageFont:
+    """Load a crisp bitmap font for low-resolution RGB matrix text."""
+    try:
+        return ImageFont.truetype(FONT_FILE, FONT_PIXEL_SIZE)
+    except OSError as exc:
+        LOGGER.warning(
+            "Unable to load matrix font %s: %s; falling back to Pillow default font",
+            FONT_FILE,
+            exc,
+        )
+        return ImageFont.load_default()
 
 
 def infer_addr_lines(
@@ -872,7 +887,7 @@ class MatrixRenderer:
         self.display = display
         self.state = state
         self.lock = threading.Lock()
-        self.font = ImageFont.load_default()
+        self.font = load_scoreboard_font()
 
     def draw(self) -> None:
         self.draw_mode("scoreboard")

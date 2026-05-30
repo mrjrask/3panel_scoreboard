@@ -23,10 +23,11 @@ FONT_FILE = Path(__file__).resolve().parent / "fonts" / "6x10.bdf"
 FONT_PIXEL_SIZE = 10
 SCORE_FONT_FILE = Path(__file__).resolve().parent / "fonts" / "9x15B.bdf"
 SCORE_FONT_PIXEL_SIZE = 15
+TEAM_NAME_FONT_FILE = Path(__file__).resolve().parent / "fonts" / "5x8.bdf"
+TEAM_NAME_FONT_PIXEL_SIZE = 8
 
 MAX_TEAM_CHARS = 10
 MAX_INNINGS = 20
-TEAM_NAME_FONT_SCALE = 0.8
 DEFAULT_TEXT_COLORS = {
     "team_a_name": "#FFFFFF",
     "team_a_score": "#FFB400",
@@ -478,6 +479,10 @@ def load_scoreboard_font() -> ImageFont.ImageFont:
 
 def load_score_font() -> ImageFont.ImageFont:
     return load_matrix_font(SCORE_FONT_FILE, SCORE_FONT_PIXEL_SIZE)
+
+
+def load_team_name_font() -> ImageFont.ImageFont:
+    return load_matrix_font(TEAM_NAME_FONT_FILE, TEAM_NAME_FONT_PIXEL_SIZE)
 
 
 def infer_addr_lines(
@@ -1069,6 +1074,7 @@ class MatrixRenderer:
         self.lock = threading.Lock()
         self.font = load_scoreboard_font()
         self.score_font = load_score_font()
+        self.team_name_font = load_team_name_font()
 
     def draw(self) -> None:
         self.draw_mode("scoreboard")

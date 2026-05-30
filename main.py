@@ -23,6 +23,9 @@ FONT_FILE = Path(__file__).resolve().parent / "fonts" / "6x10.bdf"
 FONT_PIXEL_SIZE = 10
 
 MAX_TEAM_CHARS = 10
+MAX_INNINGS = 20
+TEAM_NAME_FONT_SCALE = 0.8
+SCORE_FONT_SCALE = 1.6
 DEFAULT_TEXT_COLORS = {
     "team_a_name": "#FFFFFF",
     "team_a_score": "#FFB400",
@@ -108,7 +111,7 @@ class ScoreboardState:
         self.team_b = (self.team_b or "HOME TEAM").strip().upper()[:MAX_TEAM_CHARS]
         self.score_a = max(0, int(self.score_a))
         self.score_b = max(0, int(self.score_b))
-        self.inning = max(1, int(self.inning))
+        self.inning = min(max(1, int(self.inning)), MAX_INNINGS)
         self.balls = min(max(0, int(self.balls)), 3)
         self.strikes = min(max(0, int(self.strikes)), 2)
         self.outs = min(max(0, int(self.outs)), 2)
@@ -193,6 +196,13 @@ class ScoreboardState:
         if self.outs >= 3:
             self.outs = 0
             self._advance_half_inning()
+
+    def set_brightness(self, brightness: str | int) -> None:
+        try:
+            self.brightness = int(brightness)
+        except (TypeError, ValueError):
+            return
+        self.clamp()
 
     def update_text_colors(self, values: dict[str, str]) -> None:
         for key in DEFAULT_TEXT_COLORS:
@@ -991,17 +1001,23 @@ class MatrixRenderer:
                     batter: int,
                     lineup: int,
                 ):
-                    draw.text((2, y + 1), team, fill=colors[name_key], font=self.font)
+                    self._draw_scaled_text(
+                        draw, (2, y + 1), team, colors[name_key], TEAM_NAME_FONT_SCALE
+                    )
                     if self.state.batting_order_enabled:
                         self._draw_batting_order(
                             draw, 2, y + 10, lineup, batter, colors[name_key], dim
                         )
                     score_text = str(score)
-                    draw.text(
-                        (self.display.width - (len(score_text) * 6) - 2, y + 15),
+                    score_width, _ = self._scaled_text_size(
+                        score_text, SCORE_FONT_SCALE
+                    )
+                    self._draw_scaled_text(
+                        draw,
+                        (self.display.width - score_width - 2, y + 15),
                         score_text,
-                        fill=colors[score_key],
-                        font=self.font,
+                        colors[score_key],
+                        SCORE_FONT_SCALE,
                     )
 
                 block(
@@ -1143,6 +1159,31 @@ class MatrixRenderer:
         bbox = self.font.getbbox(text)
         return bbox[2] - bbox[0]
 
+    def _scaled_text_size(self, text: str, scale: float) -> tuple[int, int]:
+        bbox = self.font.getbbox(text)
+        width = max(1, bbox[2] - bbox[0])
+        height = max(1, bbox[3] - bbox[1])
+        return max(1, round(width * scale)), max(1, round(height * scale))
+
+    def _draw_scaled_text(
+        self,
+        draw: ImageDraw.ImageDraw,
+        xy: tuple[int, int],
+        text: str,
+        fill: tuple[int, int, int],
+        scale: float,
+    ) -> None:
+        bbox = self.font.getbbox(text)
+        width = max(1, bbox[2] - bbox[0])
+        height = max(1, bbox[3] - bbox[1])
+        mask = Image.new("L", (width, height), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.text((-bbox[0], -bbox[1]), text, fill=255, font=self.font)
+        scaled_size = self._scaled_text_size(text, scale)
+        if scaled_size != mask.size:
+            mask = mask.resize(scaled_size, Image.Resampling.NEAREST)
+        draw.bitmap(xy, mask, fill=fill)
+
     def _draw_team_panel(
         self,
         draw: ImageDraw.ImageDraw,
@@ -1157,18 +1198,22 @@ class MatrixRenderer:
         colors: dict[str, tuple[int, int, int]],
         dim: tuple[int, int, int],
     ) -> None:
-        draw.text((x + 2, 1), team, fill=colors[name_key], font=self.font)
+        self._draw_scaled_text(
+            draw, (x + 2, 1), team, colors[name_key], TEAM_NAME_FONT_SCALE
+        )
         if self.state.batting_order_enabled:
             self._draw_batting_order(
                 draw, x + 2, 10, lineup_size, current_batter, colors[name_key], dim
             )
         score_text = str(score)
-        score_x = x + width - (len(score_text) * 6) - 2
-        draw.text(
-            (max(x + 2, score_x), 18),
+        score_width, _ = self._scaled_text_size(score_text, SCORE_FONT_SCALE)
+        score_x = x + width - score_width - 2
+        self._draw_scaled_text(
+            draw,
+            (max(x + 2, score_x), 15),
             score_text,
-            fill=colors[score_key],
-            font=self.font,
+            colors[score_key],
+            SCORE_FONT_SCALE,
         )
 
     def _draw_batting_order(
@@ -1250,6 +1295,7 @@ fieldset { border:none; padding:0; margin:0; }
 input { width:100%; border-radius:10px; border:1px solid #3a4357; background:#0f141d; color:#fff; padding:10px; font-size:1rem; box-sizing:border-box; }
 input[type=color] { height:44px; padding:4px; }
 input[type=checkbox] { width:auto; }
+input[type=range] { padding:0; }
 .formgrid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; }
 .inline { display:flex; align-items:center; gap:10px; margin:10px 0; }
 label { display:block; margin:8px 0 6px; color:#c9d3e3; }
@@ -1295,6 +1341,9 @@ label { display:block; margin:8px 0 6px; color:#c9d3e3; }
               <div><label>{{label}}</label><input type='color' name='{{key}}' value='{{s.text_colors[key]}}'></div>
             {% endfor %}
           </div>
+          <label for='brightness'>Brightness: <span id='brightness-value'>{{s.brightness}}</span>%</label>
+          <input id='brightness' type='range' name='brightness' value='{{s.brightness}}' min='5' max='100' step='1'
+                 oninput="document.getElementById('brightness-value').textContent = this.value">
           <div class='inline'><input type='checkbox' name='batting_order_enabled' value='1' {% if s.batting_order_enabled %}checked{% endif %}><label style='margin:0;'>Show batting-order tracker</label></div>
           <div class='formgrid'>
             <div><label>Away Lineup Size</label><input type='number' name='batting_order_a' value='{{s.batting_order_a}}' min='1' max='20'></div>
@@ -1491,6 +1540,7 @@ def create_app(state: ScoreboardState, renderer: MatrixRenderer) -> Flask:
             if state.locked:
                 return redirect("/")
             state.update_text_colors(request.form)
+            state.set_brightness(request.form.get("brightness", state.brightness))
             state.batting_order_enabled = (
                 request.form.get("batting_order_enabled") == "1"
             )

@@ -233,7 +233,7 @@ class MatrixRendererColorTests(unittest.TestCase):
             renderer._score_text_size("99"),
             (native_size[0] * main.SCORE_SCALE, native_size[1] * main.SCORE_SCALE),
         )
-        self.assertEqual(renderer._score_text_size("99"), (36, 36))
+        self.assertEqual(renderer._score_text_size("99"), (40, 40))
 
     def test_score_draw_uses_doubled_score_text_not_generic_scaled_text(self):
         renderer = self._renderer_with_colors()

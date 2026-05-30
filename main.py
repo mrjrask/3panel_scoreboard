@@ -475,9 +475,15 @@ def load_matrix_font(font_file: Path, pixel_size: int) -> ImageFont.ImageFont:
         return ImageFont.truetype(font_file, pixel_size)
     except (OSError, SyntaxError, ValueError) as exc:
         LOGGER.warning(
-            "Unable to load matrix font %s: %s; falling back to Pillow default font",
+            "Unable to load matrix font %s: %s; falling back to Pillow default font. "
+            "Make sure the font file is readable and every parent directory is "
+            "traversable by the scoreboard process; rerun the installer or run: "
+            "chmod a+rx %s %s && chmod a+r %s",
             font_file,
             exc,
+            font_file.parent.parent,
+            font_file.parent,
+            font_file,
         )
         return ImageFont.load_default()
 

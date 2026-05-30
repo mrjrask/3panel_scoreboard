@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import importlib
 import importlib.metadata
 import json
@@ -266,6 +267,11 @@ def _write_state_file_directly(state_payload: str) -> None:
     _restore_sudo_user_ownership(STATE_FILE)
 
 
+def _can_fallback_to_direct_write(exc: OSError, tmp_path: Path | None) -> bool:
+    """Return whether a failed atomic save may safely try direct rewriting."""
+    return tmp_path is None and exc.errno in {errno.EACCES, errno.EPERM}
+
+
 def save_state(state: ScoreboardState) -> None:
     """Persist scoreboard state without reusing stale temporary files.
 
@@ -313,28 +319,41 @@ def save_state(state: ScoreboardState) -> None:
                 tmp_path.unlink(missing_ok=True)
             except OSError:
                 pass
-        try:
-            _write_state_file_directly(state_payload)
-            LOGGER.warning(
-                "Saved scoreboard state directly to %s after atomic save failed: %s. "
-                "For the safest persistence, make the state directory writable by "
-                "the scoreboard service.",
-                STATE_FILE,
-                exc,
-            )
-            return
-        except OSError as fallback_exc:
-            LOGGER.error(
-                "Unable to save scoreboard state to %s: atomic save failed: %s; "
-                "direct save failed: %s. Controls will keep working for this run, "
-                "but changes will not persist. Check ownership of the state file "
-                "and directory, or start with --state-file /path/to/writable/file. "
-                "Remove any stale %s.*.tmp files if needed.",
-                STATE_FILE,
-                exc,
-                fallback_exc,
-                STATE_FILE.stem,
-            )
+        if _can_fallback_to_direct_write(exc, tmp_path):
+            try:
+                _write_state_file_directly(state_payload)
+                LOGGER.warning(
+                    "Saved scoreboard state directly to %s after temp-file creation "
+                    "failed: %s. For the safest persistence, make the state directory "
+                    "writable by the scoreboard service.",
+                    STATE_FILE,
+                    exc,
+                )
+                return
+            except OSError as fallback_exc:
+                LOGGER.error(
+                    "Unable to save scoreboard state to %s: atomic temp-file creation "
+                    "failed: %s; direct save failed: %s. Controls will keep working "
+                    "for this run, but changes will not persist. Check ownership of "
+                    "the state file and directory, or start with --state-file "
+                    "/path/to/writable/file. Remove any stale %s.*.tmp files if needed.",
+                    STATE_FILE,
+                    exc,
+                    fallback_exc,
+                    STATE_FILE.stem,
+                )
+                return
+        LOGGER.error(
+            "Unable to save scoreboard state to %s: atomic save failed: %s. "
+            "Direct save was not attempted to avoid truncating a previously valid "
+            "state file. Controls will keep working for this run, but changes will "
+            "not persist. Check available disk space and filesystem health, or start "
+            "with --state-file /path/to/writable/file. Remove any stale %s.*.tmp "
+            "files if needed.",
+            STATE_FILE,
+            exc,
+            STATE_FILE.stem,
+        )
 
 
 def load_scoreboard_font() -> ImageFont.ImageFont:

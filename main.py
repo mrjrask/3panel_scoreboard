@@ -23,6 +23,7 @@ FONT_FILE = Path(__file__).resolve().parent / "fonts" / "6x10.bdf"
 FONT_PIXEL_SIZE = 10
 SCORE_FONT_FILE = Path(__file__).resolve().parent / "fonts" / "9x15B.bdf"
 SCORE_FONT_PIXEL_SIZE = 15
+SCORE_SCALE = 2
 TEAM_NAME_FONT_FILE = Path(__file__).resolve().parent / "fonts" / "5x8.bdf"
 TEAM_NAME_FONT_PIXEL_SIZE = 8
 
@@ -1114,17 +1115,18 @@ class MatrixRenderer:
                         self._draw_batting_order(
                             draw,
                             2,
-                            self._batting_order_y(team, y + 1),
+                            self._batting_order_y(y, panel_h),
                             lineup,
                             batter,
                             colors[name_key],
                             dim,
                         )
                     score_text = str(score)
-                    score_width, _ = self._score_text_size(score_text)
+                    score_width, score_height = self._score_text_size(score_text)
+                    score_y = y + max(0, (panel_h - score_height) // 2)
                     self._draw_score_text(
                         draw,
-                        (self.display.width - score_width - 2, y + 15),
+                        (self.display.width - score_width - 2, score_y),
                         score_text,
                         colors[score_key],
                     )
@@ -1317,7 +1319,7 @@ class MatrixRenderer:
         bbox = self.score_font.getbbox(text)
         width = max(1, bbox[2] - bbox[0])
         height = max(1, bbox[3] - bbox[1])
-        return width, height
+        return width * SCORE_SCALE, height * SCORE_SCALE
 
     def _draw_score_text(
         self,
@@ -1326,7 +1328,16 @@ class MatrixRenderer:
         text: str,
         fill: tuple[int, int, int],
     ) -> None:
-        draw.text(xy, text, fill=fill, font=self.score_font)
+        bbox = self.score_font.getbbox(text)
+        width = max(1, bbox[2] - bbox[0])
+        height = max(1, bbox[3] - bbox[1])
+        mask = Image.new("L", (width, height), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.text((-bbox[0], -bbox[1]), text, fill=255, font=self.score_font)
+        scaled_size = self._score_text_size(text)
+        if scaled_size != mask.size:
+            mask = mask.resize(scaled_size, Image.Resampling.NEAREST)
+        draw.bitmap(xy, mask, fill=fill)
 
     def _draw_team_panel(
         self,
@@ -1348,25 +1359,25 @@ class MatrixRenderer:
             self._draw_batting_order(
                 draw,
                 x + 2,
-                self._batting_order_y(team, team_y),
+                self._batting_order_y(0, self.display.height),
                 lineup_size,
                 current_batter,
                 colors[name_key],
                 dim,
             )
         score_text = str(score)
-        score_width, _ = self._score_text_size(score_text)
+        score_width, score_height = self._score_text_size(score_text)
         score_x = x + width - score_width - 2
+        score_y = max(0, (self.display.height - score_height) // 2)
         self._draw_score_text(
             draw,
-            (max(x + 2, score_x), 15),
+            (max(x + 2, score_x), score_y),
             score_text,
             colors[score_key],
         )
 
-    def _batting_order_y(self, team: str, team_y: int) -> int:
-        _, team_height = self._team_name_size(team)
-        return team_y + team_height + 2
+    def _batting_order_y(self, panel_y: int, panel_height: int) -> int:
+        return panel_y + panel_height - 1
 
     def _draw_batting_order(
         self,

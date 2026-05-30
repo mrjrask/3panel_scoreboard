@@ -216,18 +216,72 @@ def set_state_file(path: str | Path) -> None:
     STATE_FILE = Path(path).expanduser()
 
 
+def _fallback_state_files() -> list[Path]:
+    """Return writable fallback locations for persistent state."""
+    filename = STATE_FILE.name or DEFAULT_STATE_FILE.name
+    candidates: list[Path] = []
+
+    xdg_state_home = os.environ.get("XDG_STATE_HOME")
+    if xdg_state_home:
+        candidates.append(
+            Path(xdg_state_home).expanduser() / "3panel_scoreboard" / filename
+        )
+    else:
+        candidates.append(
+            Path.home() / ".local" / "state" / "3panel_scoreboard" / filename
+        )
+
+    candidates.append(Path("/var/tmp/3panel_scoreboard") / filename)
+
+    unique_candidates: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        expanded = candidate.expanduser()
+        if expanded != STATE_FILE and expanded not in seen:
+            unique_candidates.append(expanded)
+            seen.add(expanded)
+    return unique_candidates
+
+
+def _state_file_can_be_saved(state_file: Path) -> bool:
+    """Best-effort preflight for deciding whether to prefer a fallback state file."""
+    state_dir = state_file.parent if state_file.parent != Path("") else Path(".")
+    if os.access(state_dir, os.W_OK):
+        return True
+    return state_file.exists() and os.access(state_file, os.W_OK)
+
+
 def load_state() -> ScoreboardState:
-    if STATE_FILE.exists():
+    global STATE_FILE
+    fallback_candidates = _fallback_state_files()
+    if _state_file_can_be_saved(STATE_FILE):
+        load_candidates = [STATE_FILE, *fallback_candidates]
+    else:
+        load_candidates = [*fallback_candidates, STATE_FILE]
+    load_errors: list[str] = []
+
+    for candidate in load_candidates:
+        if not candidate.exists():
+            continue
         try:
-            s = ScoreboardState(**json.loads(STATE_FILE.read_text()))
+            s = ScoreboardState(**json.loads(candidate.read_text()))
             s.clamp()
+            if candidate != STATE_FILE:
+                LOGGER.warning(
+                    "Loaded scoreboard state from fallback path %s because %s was not usable.",
+                    candidate,
+                    STATE_FILE,
+                )
+                STATE_FILE = candidate
             return s
         except Exception as exc:
-            LOGGER.warning(
-                "Failed to load saved state from %s: %s; starting with defaults.",
-                STATE_FILE,
-                exc,
-            )
+            load_errors.append(f"{candidate}: {exc}")
+
+    if load_errors:
+        LOGGER.warning(
+            "Failed to load saved scoreboard state from %s; starting with defaults.",
+            "; ".join(load_errors),
+        )
     return ScoreboardState()
 
 
@@ -243,11 +297,12 @@ def _restore_sudo_user_ownership(path: Path) -> None:
         LOGGER.debug("Could not update ownership for %s: %s", path, exc)
 
 
-def _state_parent() -> Path:
-    return STATE_FILE.parent if STATE_FILE.parent != Path("") else Path(".")
+def _state_parent(state_file: Path | None = None) -> Path:
+    state_file = STATE_FILE if state_file is None else state_file
+    return state_file.parent if state_file.parent != Path("") else Path(".")
 
 
-def _write_state_file_directly(state_payload: str) -> None:
+def _write_state_file_directly(state_file: Path, state_payload: str) -> None:
     """Best-effort fallback for directories that cannot create temp files.
 
     Atomic replace needs write permission on the state directory. Some service
@@ -256,15 +311,15 @@ def _write_state_file_directly(state_payload: str) -> None:
     directly rewrite and fsync the existing state file so controls keep persisting
     instead of failing every save.
     """
-    if not STATE_FILE.exists():
-        raise FileNotFoundError(STATE_FILE)
+    if not state_file.exists():
+        raise FileNotFoundError(state_file)
 
-    with STATE_FILE.open("w", encoding="utf-8") as state_file:
-        state_file.write(state_payload)
-        state_file.write("\n")
-        state_file.flush()
-        os.fsync(state_file.fileno())
-    _restore_sudo_user_ownership(STATE_FILE)
+    with state_file.open("w", encoding="utf-8") as state_file_handle:
+        state_file_handle.write(state_payload)
+        state_file_handle.write("\n")
+        state_file_handle.flush()
+        os.fsync(state_file_handle.fileno())
+    _restore_sudo_user_ownership(state_file)
 
 
 def _can_fallback_to_direct_write(exc: OSError, tmp_path: Path | None) -> bool:
@@ -272,26 +327,20 @@ def _can_fallback_to_direct_write(exc: OSError, tmp_path: Path | None) -> bool:
     return tmp_path is None and exc.errno in {errno.EACCES, errno.EPERM}
 
 
-def save_state(state: ScoreboardState) -> None:
-    """Persist scoreboard state without reusing stale temporary files.
+def _can_fallback_to_alternate_state_file(exc: OSError) -> bool:
+    """Return whether a save failure is likely limited to the configured path."""
+    return exc.errno in {errno.EACCES, errno.EPERM, errno.EROFS}
 
-    Older runs could leave ``scoreboard_state.tmp`` behind with permissions that
-    prevented the next web action from opening it. Create a unique temporary file
-    in the same directory instead, then atomically replace the JSON state. If the
-    directory blocks temporary-file creation but the existing state file itself is
-    writable, fall back to an fsynced direct rewrite so persistence keeps working.
-    If persistence is still blocked by filesystem permissions, keep the in-memory
-    scoreboard responsive and log the repair hint instead of returning HTTP 500.
-    """
-    state_payload = json.dumps(asdict(state))
-    state_dir = _state_parent()
+
+def _save_state_payload_to_path(state_file: Path, state_payload: str) -> None:
+    state_dir = _state_parent(state_file)
     tmp_path: Path | None = None
 
     try:
         if state_dir != Path("."):
             state_dir.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
-            prefix=f"{STATE_FILE.stem}.",
+            prefix=f"{state_file.stem}.",
             suffix=".tmp",
             dir=state_dir,
             text=True,
@@ -303,8 +352,8 @@ def save_state(state: ScoreboardState) -> None:
             tmp_file.flush()
             os.fsync(tmp_file.fileno())
         _restore_sudo_user_ownership(tmp_path)
-        tmp_path.replace(STATE_FILE)
-        _restore_sudo_user_ownership(STATE_FILE)
+        tmp_path.replace(state_file)
+        _restore_sudo_user_ownership(state_file)
         try:
             dir_fd = os.open(state_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
             try:
@@ -321,35 +370,78 @@ def save_state(state: ScoreboardState) -> None:
                 pass
         if _can_fallback_to_direct_write(exc, tmp_path):
             try:
-                _write_state_file_directly(state_payload)
+                _write_state_file_directly(state_file, state_payload)
                 LOGGER.warning(
                     "Saved scoreboard state directly to %s after temp-file creation "
                     "failed: %s. For the safest persistence, make the state directory "
                     "writable by the scoreboard service.",
-                    STATE_FILE,
+                    state_file,
                     exc,
                 )
                 return
             except OSError as fallback_exc:
-                LOGGER.error(
-                    "Unable to save scoreboard state to %s: atomic temp-file creation "
-                    "failed: %s; direct save failed: %s. Controls will keep working "
-                    "for this run, but changes will not persist. Check ownership of "
-                    "the state file and directory, or start with --state-file "
-                    "/path/to/writable/file. Remove any stale %s.*.tmp files if needed.",
-                    STATE_FILE,
-                    exc,
-                    fallback_exc,
-                    STATE_FILE.stem,
-                )
-                return
+                raise OSError(
+                    exc.errno,
+                    "atomic temp-file creation failed: "
+                    f"{exc}; direct save failed: {fallback_exc}",
+                ) from fallback_exc
+        raise
+
+
+def _save_state_payload_to_fallback(state_payload: str, original_exc: OSError) -> bool:
+    global STATE_FILE
+    original_state_file = STATE_FILE
+    for fallback_state_file in _fallback_state_files():
+        try:
+            _save_state_payload_to_path(fallback_state_file, state_payload)
+        except OSError as fallback_exc:
+            LOGGER.debug(
+                "Could not save scoreboard state to fallback path %s after %s failed: %s",
+                fallback_state_file,
+                original_state_file,
+                fallback_exc,
+            )
+            continue
+
+        STATE_FILE = fallback_state_file
+        LOGGER.warning(
+            "Unable to save scoreboard state to %s because of a permissions error: %s. "
+            "Saved this and future changes to writable fallback path %s instead.",
+            original_state_file,
+            original_exc,
+            fallback_state_file,
+        )
+        return True
+    return False
+
+
+def save_state(state: ScoreboardState) -> None:
+    """Persist scoreboard state without reusing stale temporary files.
+
+    Older runs could leave ``scoreboard_state.tmp`` behind with permissions that
+    prevented the next web action from opening it. Create a unique temporary file
+    in the same directory instead, then atomically replace the JSON state. If the
+    directory blocks temporary-file creation but the existing state file itself is
+    writable, fall back to an fsynced direct rewrite so persistence keeps working.
+    If the configured path is not writable at all, move persistence to a per-user
+    fallback path so controls continue to persist instead of failing every save.
+    If persistence is still blocked by filesystem permissions, keep the in-memory
+    scoreboard responsive and log the repair hint instead of returning HTTP 500.
+    """
+    state_payload = json.dumps(asdict(state))
+
+    try:
+        _save_state_payload_to_path(STATE_FILE, state_payload)
+    except OSError as exc:
+        can_use_fallback_path = _can_fallback_to_alternate_state_file(exc)
+        if can_use_fallback_path and _save_state_payload_to_fallback(state_payload, exc):
+            return
         LOGGER.error(
             "Unable to save scoreboard state to %s: atomic save failed: %s. "
-            "Direct save was not attempted to avoid truncating a previously valid "
-            "state file. Controls will keep working for this run, but changes will "
-            "not persist. Check available disk space and filesystem health, or start "
-            "with --state-file /path/to/writable/file. Remove any stale %s.*.tmp "
-            "files if needed.",
+            "Direct save was not attempted or did not succeed. Controls will keep "
+            "working for this run, but changes will not persist. Check ownership of "
+            "the state file and directory, or start with --state-file "
+            "/path/to/writable/file. Remove any stale %s.*.tmp files if needed.",
             STATE_FILE,
             exc,
             STATE_FILE.stem,
@@ -991,10 +1083,17 @@ class MatrixRenderer:
                     batter: int,
                     lineup: int,
                 ):
-                    draw.text((2, y + 1), team, fill=colors[name_key], font=self.font)
+                    team_y = y + 1
+                    draw.text((2, team_y), team, fill=colors[name_key], font=self.font)
                     if self.state.batting_order_enabled:
                         self._draw_batting_order(
-                            draw, 2, y + 10, lineup, batter, colors[name_key], dim
+                            draw,
+                            2,
+                            self._batting_order_y(team, team_y),
+                            lineup,
+                            batter,
+                            colors[name_key],
+                            dim,
                         )
                     score_text = str(score)
                     draw.text(
@@ -1143,6 +1242,13 @@ class MatrixRenderer:
         bbox = self.font.getbbox(text)
         return bbox[2] - bbox[0]
 
+    def _text_height(self, text: str) -> int:
+        bbox = self.font.getbbox(text)
+        return bbox[3] - bbox[1]
+
+    def _batting_order_y(self, team: str, team_y: int) -> int:
+        return team_y + self._text_height(team) + 2
+
     def _draw_team_panel(
         self,
         draw: ImageDraw.ImageDraw,
@@ -1157,10 +1263,17 @@ class MatrixRenderer:
         colors: dict[str, tuple[int, int, int]],
         dim: tuple[int, int, int],
     ) -> None:
-        draw.text((x + 2, 1), team, fill=colors[name_key], font=self.font)
+        team_y = 1
+        draw.text((x + 2, team_y), team, fill=colors[name_key], font=self.font)
         if self.state.batting_order_enabled:
             self._draw_batting_order(
-                draw, x + 2, 10, lineup_size, current_batter, colors[name_key], dim
+                draw,
+                x + 2,
+                self._batting_order_y(team, team_y),
+                lineup_size,
+                current_batter,
+                colors[name_key],
+                dim,
             )
         score_text = str(score)
         score_x = x + width - (len(score_text) * 6) - 2

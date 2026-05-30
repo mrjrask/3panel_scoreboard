@@ -82,6 +82,36 @@ class SaveStateTests(unittest.TestCase):
         self.assertEqual(state_file.read_text(), original_payload)
         self.assertIn("Direct save was not attempted", "\n".join(logs.output))
 
+    def test_save_state_uses_writable_fallback_when_configured_path_is_denied(self):
+        denied_parent = Path(self.tmpdir.name) / "denied"
+        denied_parent.mkdir()
+        state_file = denied_parent / "scoreboard_state.json"
+        fallback_home = Path(self.tmpdir.name) / "state-home"
+        main.set_state_file(state_file)
+        original_mkstemp = main.tempfile.mkstemp
+
+        def fail_primary_only(*args, **kwargs):
+            if Path(kwargs["dir"]) == denied_parent:
+                raise PermissionError(13, "Permission denied", str(denied_parent))
+            return original_mkstemp(*args, **kwargs)
+
+        state = main.ScoreboardState(score_a=11, score_b=10)
+        with (
+            mock.patch.dict(main.os.environ, {"XDG_STATE_HOME": str(fallback_home)}),
+            mock.patch.object(
+                main.tempfile, "mkstemp", side_effect=fail_primary_only
+            ),
+            self.assertLogs(main.LOGGER, level="WARNING") as logs,
+        ):
+            main.save_state(state)
+
+        fallback_file = fallback_home / "3panel_scoreboard" / "scoreboard_state.json"
+        saved = json.loads(fallback_file.read_text())
+        self.assertEqual(saved["score_a"], 11)
+        self.assertEqual(saved["score_b"], 10)
+        self.assertEqual(main.STATE_FILE, fallback_file)
+        self.assertIn("Saved this and future changes", "\n".join(logs.output))
+
 
 class MatrixRendererColorTests(unittest.TestCase):
     class FakeDisplay:
@@ -125,6 +155,30 @@ class MatrixRendererColorTests(unittest.TestCase):
         self.assertEqual(draw_inning_line.call_args.args[4], "BOT")
         self.assertEqual(draw_inning_line.call_args.args[7], (170, 187, 204))
         self.assertNotEqual(draw_inning_line.call_args.args[7], (68, 85, 102))
+
+    def test_horizontal_batting_order_is_drawn_below_team_name(self):
+        renderer = self._renderer_with_colors()
+
+        with mock.patch.object(renderer, "_draw_batting_order") as draw_batting_order:
+            renderer.draw_mode()
+
+        first_call = draw_batting_order.call_args_list[0].args
+        self.assertEqual(
+            first_call[2], renderer._batting_order_y(renderer.state.team_a, 1)
+        )
+        self.assertGreater(first_call[2], 10)
+
+    def test_vertical_batting_order_is_drawn_below_team_name(self):
+        renderer = self._renderer_with_colors(width=64, height=96)
+
+        with mock.patch.object(renderer, "_draw_batting_order") as draw_batting_order:
+            renderer.draw_mode()
+
+        first_call = draw_batting_order.call_args_list[0].args
+        self.assertEqual(
+            first_call[2], renderer._batting_order_y(renderer.state.team_a, 1)
+        )
+        self.assertGreater(first_call[2], 10)
 
 
 if __name__ == "__main__":

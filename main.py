@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template_string, request
-from PIL import Image, ImageDraw, ImageFont
+from PIL import BdfFontFile, Image, ImageDraw, ImageFont
 
 
 DEFAULT_STATE_FILE = Path("scoreboard_state.json")
@@ -461,11 +461,19 @@ def save_state(state: ScoreboardState) -> None:
         )
 
 
+def load_bdf_font(font_file: Path) -> ImageFont.ImageFont:
+    """Load an X11 BDF bitmap font without relying on FreeType BDF support."""
+    with font_file.open("rb") as font_handle:
+        return BdfFontFile.BdfFontFile(font_handle).to_imagefont()
+
+
 def load_matrix_font(font_file: Path, pixel_size: int) -> ImageFont.ImageFont:
     """Load a crisp bitmap font for low-resolution RGB matrix text."""
     try:
+        if font_file.suffix.lower() == ".bdf":
+            return load_bdf_font(font_file)
         return ImageFont.truetype(font_file, pixel_size)
-    except OSError as exc:
+    except (OSError, SyntaxError, ValueError) as exc:
         LOGGER.warning(
             "Unable to load matrix font %s: %s; falling back to Pillow default font",
             font_file,

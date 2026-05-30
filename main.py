@@ -1220,6 +1220,12 @@ HTML = """<!doctype html>
 body { font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; margin:0; background:#0b0d12; color:#eef2f7; }
 .container { max-width: 760px; margin:0 auto; padding: 16px; }
 .card { background:#151a23; border:1px solid #283040; border-radius:14px; padding:14px; margin-bottom:12px; }
+details.card { padding:0; overflow:hidden; }
+details.card > summary { cursor:pointer; list-style:none; padding:14px; font-size:1.15rem; font-weight:800; }
+details.card > summary::-webkit-details-marker { display:none; }
+details.card > summary::before { content:'▸'; display:inline-block; margin-right:8px; transition:transform 0.15s ease; }
+details.card[open] > summary::before { transform:rotate(90deg); }
+.section-body { padding:0 14px 14px; }
 .status { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
 .scoreline { font-size:1.2rem; font-weight:700; }
 .meta { color:#a9b5c9; }
@@ -1241,58 +1247,155 @@ label { display:block; margin:8px 0 6px; color:#c9d3e3; }
 </head>
 <body>
 <div class='container'>
-  <div class='card status'>
-    <div>
-      <div class='scoreline'>{{s.team_a}} {{s.score_a}} &nbsp;|&nbsp; {{s.team_b}} {{s.score_b}}</div>
-      <div class='meta'>{{s.inning_half|upper}} {{s.inning}} • B{{s.balls}} S{{s.strikes}} O{{s.outs}}{% if s.batting_order_enabled %} • Batters A{{s.current_batter_a + 1}}/{{s.batting_order_a}} H{{s.current_batter_b + 1}}/{{s.batting_order_b}}{% endif %}</div>
+  <details class='card' data-section='score' open>
+    <summary>Scoreboard Status</summary>
+    <div class='section-body status'>
+      <div>
+        <div class='scoreline'>{{s.team_a}} {{s.score_a}} &nbsp;|&nbsp; {{s.team_b}} {{s.score_b}}</div>
+        <div class='meta'>{{s.inning_half|upper}} {{s.inning}} • B{{s.balls}} S{{s.strikes}} O{{s.outs}}{% if s.batting_order_enabled %} • Batters A{{s.current_batter_a + 1}}/{{s.batting_order_a}} H{{s.current_batter_b + 1}}/{{s.batting_order_b}}{% endif %}</div>
+      </div>
+      <form method='post' action='/lock-toggle'>
+        <button class='{{"unlock" if s.locked else "lock"}}'>{{"Unlock Controls" if s.locked else "Lock Controls"}}</button>
+      </form>
     </div>
-    <form method='post' action='/lock-toggle'>
-      <button class='{{"unlock" if s.locked else "lock"}}'>{{"Unlock Controls" if s.locked else "Lock Controls"}}</button>
-    </form>
-  </div>
+  </details>
 
-  <div class='card'>
-    <form method='post' action='/rename'>
+  <details class='card' data-section='teams' open>
+    <summary>Team Names</summary>
+    <div class='section-body'>
+      <form method='post' action='/rename'>
+        <fieldset {{'disabled' if s.locked else ''}}>
+          <label>Away Team</label><input name='team_a' value='{{s.team_a}}' maxlength='{{max_team_chars}}'>
+          <label>Home Team</label><input name='team_b' value='{{s.team_b}}' maxlength='{{max_team_chars}}'>
+          <div style='margin-top:10px;'><button>Save Team Names</button></div>
+        </fieldset>
+        {% if s.locked %}<p class='small'>Unlock controls to rename teams.</p>{% endif %}
+      </form>
+    </div>
+  </details>
+
+  <details class='card' data-section='layout-colors'>
+    <summary>Layout & Colors</summary>
+    <div class='section-body'>
+      <form method='post' action='/config'>
+        <fieldset {{'disabled' if s.locked else ''}}>
+          <div class='formgrid'>
+            {% for key,label in color_fields %}
+              <div><label>{{label}}</label><input type='color' name='{{key}}' value='{{s.text_colors[key]}}'></div>
+            {% endfor %}
+          </div>
+          <div class='inline'><input type='checkbox' name='batting_order_enabled' value='1' {% if s.batting_order_enabled %}checked{% endif %}><label style='margin:0;'>Show batting-order tracker</label></div>
+          <div class='formgrid'>
+            <div><label>Away Lineup Size</label><input type='number' name='batting_order_a' value='{{s.batting_order_a}}' min='1' max='20'></div>
+            <div><label>Home Lineup Size</label><input type='number' name='batting_order_b' value='{{s.batting_order_b}}' min='1' max='20'></div>
+          </div>
+          <div style='margin-top:10px;'><button>Save Layout & Colors</button></div>
+        </fieldset>
+      </form>
+    </div>
+  </details>
+
+  <details class='card' data-section='controls' open>
+    <summary>Controls</summary>
+    <div class='section-body'>
       <fieldset {{'disabled' if s.locked else ''}}>
-        <label>Away Team</label><input name='team_a' value='{{s.team_a}}' maxlength='{{max_team_chars}}'>
-        <label>Home Team</label><input name='team_b' value='{{s.team_b}}' maxlength='{{max_team_chars}}'>
-        <div style='margin-top:10px;'><button>Save Team Names</button></div>
-      </fieldset>
-      {% if s.locked %}<p class='small'>Unlock controls to rename teams.</p>{% endif %}
-    </form>
-  </div>
-
-
-  <div class='card'>
-    <form method='post' action='/config'>
-      <fieldset {{'disabled' if s.locked else ''}}>
-        <h2 style='margin-top:0;'>Layout & Colors</h2>
-        <div class='formgrid'>
-          {% for key,label in color_fields %}
-            <div><label>{{label}}</label><input type='color' name='{{key}}' value='{{s.text_colors[key]}}'></div>
+        <div class='grid'>
+          {% for label,a,style in actions %}
+            <form method='post' action='/action/{{a}}'><button class='{{style}}'>{{label}}</button></form>
           {% endfor %}
         </div>
-        <div class='inline'><input type='checkbox' name='batting_order_enabled' value='1' {% if s.batting_order_enabled %}checked{% endif %}><label style='margin:0;'>Show batting-order tracker</label></div>
-        <div class='formgrid'>
-          <div><label>Away Lineup Size</label><input type='number' name='batting_order_a' value='{{s.batting_order_a}}' min='1' max='20'></div>
-          <div><label>Home Lineup Size</label><input type='number' name='batting_order_b' value='{{s.batting_order_b}}' min='1' max='20'></div>
-        </div>
-        <div style='margin-top:10px;'><button>Save Layout & Colors</button></div>
+        {% if s.locked %}<p class='small'>Controls are locked.</p>{% endif %}
       </fieldset>
-    </form>
-  </div>
-
-  <div class='card'>
-    <fieldset {{'disabled' if s.locked else ''}}>
-      <div class='grid'>
-        {% for label,a,style in actions %}
-          <form method='post' action='/action/{{a}}'><button class='{{style}}'>{{label}}</button></form>
-        {% endfor %}
-      </div>
-      {% if s.locked %}<p class='small'>Controls are locked.</p>{% endif %}
-    </fieldset>
-  </div>
+    </div>
+  </details>
 </div>
+<script>
+(() => {
+  const sectionStorageKey = 'scoreboard-section-open-state';
+
+  function getStoredSectionState() {
+    try {
+      return JSON.parse(localStorage.getItem(sectionStorageKey) || '{}');
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function storeSectionState() {
+    const state = {};
+    document.querySelectorAll('details[data-section]').forEach((details) => {
+      state[details.dataset.section] = details.open;
+    });
+    try {
+      localStorage.setItem(sectionStorageKey, JSON.stringify(state));
+    } catch (error) {
+      // Keep controls working even if localStorage is blocked or unavailable.
+    }
+    return state;
+  }
+
+  function applySectionState(state) {
+    document.querySelectorAll('details[data-section]').forEach((details) => {
+      if (Object.prototype.hasOwnProperty.call(state, details.dataset.section)) {
+        details.open = Boolean(state[details.dataset.section]);
+      }
+    });
+  }
+
+  function bindSectionToggles() {
+    document.querySelectorAll('details[data-section]').forEach((details) => {
+      details.addEventListener('toggle', storeSectionState);
+    });
+  }
+
+  function bindAjaxForms() {
+    document.querySelectorAll('form[method="post"]').forEach((form) => {
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const scrollPosition = { x: window.scrollX, y: window.scrollY };
+        const sectionState = storeSectionState();
+        const submitter = event.submitter;
+        if (submitter) {
+          submitter.disabled = true;
+        }
+
+        try {
+          const response = await fetch(form.action, {
+            method: 'POST',
+            body: new FormData(form),
+            credentials: 'same-origin',
+            headers: { 'X-Requested-With': 'fetch' },
+          });
+          if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`);
+          }
+
+          const html = await response.text();
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          const newContainer = doc.querySelector('.container');
+          const currentContainer = document.querySelector('.container');
+          if (!newContainer || !currentContainer) {
+            throw new Error('Updated page content was not found.');
+          }
+
+          currentContainer.replaceWith(newContainer);
+          applySectionState(sectionState);
+          bindSectionToggles();
+          bindAjaxForms();
+          window.scrollTo(scrollPosition.x, scrollPosition.y);
+        } catch (error) {
+          console.error(error);
+          HTMLFormElement.prototype.submit.call(form);
+        }
+      });
+    });
+  }
+
+  applySectionState(getStoredSectionState());
+  bindSectionToggles();
+  bindAjaxForms();
+})();
+</script>
 </body>
 </html>"""
 

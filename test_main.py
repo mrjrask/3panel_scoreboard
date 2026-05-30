@@ -47,5 +47,33 @@ class SaveStateTests(unittest.TestCase):
         self.assertEqual(saved["score_b"], 4)
 
 
+class WebUITests(unittest.TestCase):
+    def test_sections_are_collapsible_with_layout_colors_closed_by_default(self):
+        state = main.ScoreboardState()
+        renderer = mock.Mock()
+        app = main.create_app(state, renderer)
+
+        response = app.test_client().get("/")
+        html = response.get_data(as_text=True)
+
+        self.assertIn("<details class='card' data-section='score' open>", html)
+        self.assertIn("<details class='card' data-section='teams' open>", html)
+        self.assertIn("<details class='card' data-section='layout-colors'>", html)
+        self.assertIn("<summary>Layout & Colors</summary>", html)
+        self.assertIn("<details class='card' data-section='controls' open>", html)
+
+    def test_web_ui_submits_buttons_without_full_page_navigation(self):
+        state = main.ScoreboardState()
+        renderer = mock.Mock()
+        app = main.create_app(state, renderer)
+
+        response = app.test_client().get("/")
+        html = response.get_data(as_text=True)
+
+        self.assertIn("event.preventDefault();", html)
+        self.assertIn("window.scrollTo(scrollPosition.x, scrollPosition.y);", html)
+        self.assertIn("fetch(form.action", html)
+
+
 if __name__ == "__main__":
     unittest.main()

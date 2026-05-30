@@ -21,14 +21,12 @@ DEFAULT_STATE_FILE = Path("scoreboard_state.json")
 STATE_FILE = Path(os.environ.get("SCOREBOARD_STATE_FILE", DEFAULT_STATE_FILE))
 FONT_FILE = Path(__file__).resolve().parent / "fonts" / "6x10.bdf"
 FONT_PIXEL_SIZE = 10
-# Use a native smaller bitmap font for team names instead of fractional
-# downscaling, which can drop pixel rows/columns from glyphs.
-TEAM_NAME_FONT_FILE = Path(__file__).resolve().parent / "fonts" / "5x8.bdf"
-TEAM_NAME_FONT_PIXEL_SIZE = 8
+SCORE_FONT_FILE = Path(__file__).resolve().parent / "fonts" / "9x15B.bdf"
+SCORE_FONT_PIXEL_SIZE = 15
 
 MAX_TEAM_CHARS = 10
 MAX_INNINGS = 20
-SCORE_FONT_SCALE = 1.6
+TEAM_NAME_FONT_SCALE = 0.8
 DEFAULT_TEXT_COLORS = {
     "team_a_name": "#FFFFFF",
     "team_a_score": "#FFB400",
@@ -461,22 +459,25 @@ def save_state(state: ScoreboardState) -> None:
         )
 
 
-def load_scoreboard_font(
-    font_file: Path = FONT_FILE,
-    pixel_size: int = FONT_PIXEL_SIZE,
-    description: str = "matrix",
-) -> ImageFont.ImageFont:
+def load_matrix_font(font_file: Path, pixel_size: int) -> ImageFont.ImageFont:
     """Load a crisp bitmap font for low-resolution RGB matrix text."""
     try:
         return ImageFont.truetype(font_file, pixel_size)
     except OSError as exc:
         LOGGER.warning(
-            "Unable to load %s font %s: %s; falling back to Pillow default font",
-            description,
+            "Unable to load matrix font %s: %s; falling back to Pillow default font",
             font_file,
             exc,
         )
         return ImageFont.load_default()
+
+
+def load_scoreboard_font() -> ImageFont.ImageFont:
+    return load_matrix_font(FONT_FILE, FONT_PIXEL_SIZE)
+
+
+def load_score_font() -> ImageFont.ImageFont:
+    return load_matrix_font(SCORE_FONT_FILE, SCORE_FONT_PIXEL_SIZE)
 
 
 def infer_addr_lines(
@@ -1067,9 +1068,7 @@ class MatrixRenderer:
         self.state = state
         self.lock = threading.Lock()
         self.font = load_scoreboard_font()
-        self.team_name_font = load_scoreboard_font(
-            TEAM_NAME_FONT_FILE, TEAM_NAME_FONT_PIXEL_SIZE, "team-name"
-        )
+        self.score_font = load_score_font()
 
     def draw(self) -> None:
         self.draw_mode("scoreboard")
@@ -1116,15 +1115,12 @@ class MatrixRenderer:
                             dim,
                         )
                     score_text = str(score)
-                    score_width, _ = self._scaled_text_size(
-                        score_text, SCORE_FONT_SCALE
-                    )
-                    self._draw_scaled_text(
+                    score_width, _ = self._score_text_size(score_text)
+                    self._draw_score_text(
                         draw,
                         (self.display.width - score_width - 2, y + 15),
                         score_text,
                         colors[score_key],
-                        SCORE_FONT_SCALE,
                     )
 
                 block(
@@ -1311,6 +1307,21 @@ class MatrixRenderer:
             mask = mask.resize(scaled_size, Image.Resampling.NEAREST)
         draw.bitmap(xy, mask, fill=fill)
 
+    def _score_text_size(self, text: str) -> tuple[int, int]:
+        bbox = self.score_font.getbbox(text)
+        width = max(1, bbox[2] - bbox[0])
+        height = max(1, bbox[3] - bbox[1])
+        return width, height
+
+    def _draw_score_text(
+        self,
+        draw: ImageDraw.ImageDraw,
+        xy: tuple[int, int],
+        text: str,
+        fill: tuple[int, int, int],
+    ) -> None:
+        draw.text(xy, text, fill=fill, font=self.score_font)
+
     def _draw_team_panel(
         self,
         draw: ImageDraw.ImageDraw,
@@ -1338,14 +1349,13 @@ class MatrixRenderer:
                 dim,
             )
         score_text = str(score)
-        score_width, _ = self._scaled_text_size(score_text, SCORE_FONT_SCALE)
+        score_width, _ = self._score_text_size(score_text)
         score_x = x + width - score_width - 2
-        self._draw_scaled_text(
+        self._draw_score_text(
             draw,
             (max(x + 2, score_x), 15),
             score_text,
             colors[score_key],
-            SCORE_FONT_SCALE,
         )
 
     def _batting_order_y(self, team: str, team_y: int) -> int:

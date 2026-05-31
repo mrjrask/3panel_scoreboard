@@ -190,6 +190,9 @@ class MatrixRendererColorTests(unittest.TestCase):
             mock.patch.object(
                 renderer, "_draw_scaled_text", wraps=renderer._draw_scaled_text
             ) as draw_scaled_text,
+            mock.patch.object(
+                renderer, "_draw_inning_number", wraps=renderer._draw_inning_number
+            ) as draw_inning_number,
             mock.patch.object(draw, "text", wraps=draw.text) as draw_text,
         ):
             renderer._draw_inning_line(
@@ -205,10 +208,12 @@ class MatrixRendererColorTests(unittest.TestCase):
 
         self.assertEqual(draw_scaled_text.call_args.args[2], "INN")
         self.assertEqual(draw_scaled_text.call_args.args[4], 0.5)
-        text_calls = draw_text.call_args_list
-        self.assertEqual(text_calls[0].args[1], "TOP ")
-        self.assertEqual(text_calls[1].args[1], "7")
-        self.assertLess(text_calls[0].args[0][0], text_calls[1].args[0][0])
+        self.assertEqual(draw_text.call_args.args[1], "TOP ")
+        self.assertEqual(draw_inning_number.call_args.args[2], "7")
+        self.assertLess(
+            draw_text.call_args.args[0][0],
+            draw_inning_number.call_args.args[1][0],
+        )
 
     def test_team_name_font_uses_native_bitmap_size(self):
         renderer = self._renderer_with_colors()
@@ -249,18 +254,13 @@ class MatrixRendererColorTests(unittest.TestCase):
         first_call = draw_batting_order.call_args_list[0].args
         self.assertEqual(first_call[2], 31)
 
-    def test_score_uses_next_larger_double_native_score_font_size(self):
+    def test_score_uses_large_seven_segment_digit_size(self):
         renderer = self._renderer_with_colors()
-        score_bbox = renderer.score_font.getbbox("99")
-        native_size = (score_bbox[2] - score_bbox[0], score_bbox[3] - score_bbox[1])
 
-        self.assertEqual(
-            renderer._score_text_size("99"),
-            (native_size[0] * main.SCORE_SCALE, native_size[1] * main.SCORE_SCALE),
-        )
-        self.assertEqual(renderer._score_text_size("99"), (40, 40))
+        self.assertEqual(renderer._score_text_size("9"), (14, 24))
+        self.assertEqual(renderer._score_text_size("99"), (30, 24))
 
-    def test_score_draw_uses_doubled_score_text_not_generic_scaled_text(self):
+    def test_score_draw_uses_seven_segment_score_text_not_generic_scaled_text(self):
         renderer = self._renderer_with_colors()
         renderer.state.score_a = 12
         renderer.state.score_b = 9
@@ -272,14 +272,24 @@ class MatrixRendererColorTests(unittest.TestCase):
             mock.patch.object(
                 renderer, "_draw_score_text", wraps=renderer._draw_score_text
             ) as draw_score_text,
+            mock.patch.object(
+                renderer,
+                "_draw_seven_segment_text",
+                wraps=renderer._draw_seven_segment_text,
+            ) as draw_seven_segment_text,
         ):
             renderer.draw_mode()
 
         scaled_text_values = [call.args[2] for call in draw_scaled_text.call_args_list]
         score_text_values = [call.args[2] for call in draw_score_text.call_args_list]
+        seven_segment_values = [
+            call.args[2] for call in draw_seven_segment_text.call_args_list
+        ]
         self.assertNotIn("12", scaled_text_values)
         self.assertNotIn("9", scaled_text_values)
         self.assertEqual(score_text_values, ["12", "9"])
+        self.assertIn("12", seven_segment_values)
+        self.assertIn("9", seven_segment_values)
 
 
 class ScoreboardStateLimitTests(unittest.TestCase):

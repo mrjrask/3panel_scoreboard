@@ -291,6 +291,40 @@ class MatrixRendererColorTests(unittest.TestCase):
         self.assertIn("12", seven_segment_values)
         self.assertIn("9", seven_segment_values)
 
+    def test_score_digit_one_extends_two_rows_above_and_below_digit_box(self):
+        renderer = self._renderer_with_colors()
+        image = main.Image.new("RGB", (24, 32), (0, 0, 0))
+        draw = main.ImageDraw.Draw(image)
+        active_color = (255, 180, 0)
+
+        renderer._draw_score_text(draw, (3, 3), "1", active_color)
+
+        pixels = image.load()
+        right_segment_x = 3 + main.SEVEN_SEGMENT_SCORE_DIGIT_SIZE[0] - 1
+        digit_top = 3
+        digit_bottom = digit_top + main.SEVEN_SEGMENT_SCORE_DIGIT_SIZE[1] - 1
+        self.assertEqual(pixels[right_segment_x, digit_top - 2], active_color)
+        self.assertEqual(pixels[right_segment_x, digit_top - 1], active_color)
+        self.assertEqual(pixels[right_segment_x, digit_bottom + 1], active_color)
+        self.assertEqual(pixels[right_segment_x, digit_bottom + 2], active_color)
+
+    def test_inning_digit_one_extends_two_rows_above_and_below_digit_box(self):
+        renderer = self._renderer_with_colors()
+        image = main.Image.new("RGB", (16, 24), (0, 0, 0))
+        draw = main.ImageDraw.Draw(image)
+        active_color = (170, 187, 204)
+
+        renderer._draw_inning_number(draw, (4, 4), "1", active_color)
+
+        pixels = image.load()
+        right_segment_x = 4 + main.SEVEN_SEGMENT_INNING_DIGIT_SIZE[0] - 1
+        digit_top = 4
+        digit_bottom = digit_top + main.SEVEN_SEGMENT_INNING_DIGIT_SIZE[1] - 1
+        self.assertEqual(pixels[right_segment_x, digit_top - 2], active_color)
+        self.assertEqual(pixels[right_segment_x, digit_top - 1], active_color)
+        self.assertEqual(pixels[right_segment_x, digit_bottom + 1], active_color)
+        self.assertEqual(pixels[right_segment_x, digit_bottom + 2], active_color)
+
     def test_count_indicators_are_three_by_three_squares(self):
         renderer = self._renderer_with_colors()
         image = main.Image.new("RGB", (24, 12), (0, 0, 0))

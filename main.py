@@ -29,6 +29,7 @@ SEVEN_SEGMENT_SCORE_THICKNESS = 2
 SEVEN_SEGMENT_INNING_DIGIT_SIZE = (7, 11)
 SEVEN_SEGMENT_INNING_THICKNESS = 1
 SEVEN_SEGMENT_DIGIT_GAP = 2
+SEVEN_SEGMENT_ONE_VERTICAL_EXTENSION = 2
 TEAM_NAME_FONT_FILE = Path(__file__).resolve().parent / "fonts" / "5x8.bdf"
 TEAM_NAME_FONT_PIXEL_SIZE = 8
 
@@ -1449,10 +1450,16 @@ class MatrixRenderer:
         bottom_y = y + height - t
         right_x = x + width - t
 
+        one_extension = SEVEN_SEGMENT_ONE_VERTICAL_EXTENSION if char == "1" else 0
         segment_rects = {
             "a": (x + t, y, x + width - t - 1, y + t - 1),
-            "b": (right_x, y + t, x + width - 1, mid_y - 1),
-            "c": (right_x, mid_y + 1, x + width - 1, bottom_y - 1),
+            "b": (right_x, y - one_extension, x + width - 1, mid_y - 1),
+            "c": (
+                right_x,
+                mid_y + 1,
+                x + width - 1,
+                y + height - 1 + one_extension,
+            ),
             "d": (x + t, bottom_y, x + width - t - 1, y + height - 1),
             "e": (x, mid_y + 1, x + t - 1, bottom_y - 1),
             "f": (x, y + t, x + t - 1, mid_y - 1),

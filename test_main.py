@@ -154,7 +154,6 @@ class MatrixRendererColorTests(unittest.TestCase):
             {
                 "team_a_name": "#112233",
                 "team_b_name": "#445566",
-                "inning_label": "#778899",
                 "inning_value": "#AABBCC",
             }
         )
@@ -168,8 +167,8 @@ class MatrixRendererColorTests(unittest.TestCase):
             renderer.draw_mode()
 
         self.assertEqual(draw_inning_line.call_args.args[4], "TOP")
-        self.assertEqual(draw_inning_line.call_args.args[7], (170, 187, 204))
-        self.assertNotEqual(draw_inning_line.call_args.args[7], (17, 34, 51))
+        self.assertEqual(draw_inning_line.call_args.args[6], (170, 187, 204))
+        self.assertNotEqual(draw_inning_line.call_args.args[6], (17, 34, 51))
 
     def test_bottom_indicator_uses_inning_value_color_in_vertical_layout(self):
         renderer = self._renderer_with_colors(width=64, height=96, inning_half="bottom")
@@ -178,10 +177,10 @@ class MatrixRendererColorTests(unittest.TestCase):
             renderer.draw_mode()
 
         self.assertEqual(draw_inning_line.call_args.args[4], "BOT")
-        self.assertEqual(draw_inning_line.call_args.args[7], (170, 187, 204))
-        self.assertNotEqual(draw_inning_line.call_args.args[7], (68, 85, 102))
+        self.assertEqual(draw_inning_line.call_args.args[6], (170, 187, 204))
+        self.assertNotEqual(draw_inning_line.call_args.args[6], (68, 85, 102))
 
-    def test_inning_line_uses_half_size_label_before_half_and_inning(self):
+    def test_inning_line_starts_with_half_and_inning_without_label(self):
         renderer = self._renderer_with_colors()
         image = main.Image.new("RGB", (64, 32), (0, 0, 0))
         draw = main.ImageDraw.Draw(image)
@@ -198,14 +197,13 @@ class MatrixRendererColorTests(unittest.TestCase):
                 1,
                 "7",
                 "TOP",
-                (119, 136, 153),
                 (170, 187, 204),
                 (170, 187, 204),
             )
 
-        self.assertEqual(draw_scaled_text.call_args.args[2], "INN")
-        self.assertEqual(draw_scaled_text.call_args.args[4], 0.5)
+        draw_scaled_text.assert_not_called()
         text_calls = draw_text.call_args_list
+        self.assertEqual(text_calls[0].args[0], (2, 1))
         self.assertEqual(text_calls[0].args[1], "TOP ")
         self.assertEqual(text_calls[1].args[1], "7")
         self.assertLess(text_calls[0].args[0][0], text_calls[1].args[0][0])

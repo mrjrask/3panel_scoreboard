@@ -24,6 +24,11 @@ FONT_PIXEL_SIZE = 10
 SCORE_FONT_FILE = Path(__file__).resolve().parent / "fonts" / "10x20.bdf"
 SCORE_FONT_PIXEL_SIZE = 20
 SCORE_SCALE = 2
+SEVEN_SEGMENT_SCORE_DIGIT_SIZE = (14, 24)
+SEVEN_SEGMENT_SCORE_THICKNESS = 2
+SEVEN_SEGMENT_INNING_DIGIT_SIZE = (7, 11)
+SEVEN_SEGMENT_INNING_THICKNESS = 1
+SEVEN_SEGMENT_DIGIT_GAP = 2
 TEAM_NAME_FONT_FILE = Path(__file__).resolve().parent / "fonts" / "5x8.bdf"
 TEAM_NAME_FONT_PIXEL_SIZE = 8
 
@@ -1269,10 +1274,25 @@ class MatrixRenderer:
         half_color: tuple[int, int, int],
     ) -> None:
         half_label = f"{half} "
-        half_x = x
-        draw.text((half_x, y), half_label, fill=half_color, font=self.font)
+        label_width, label_height = self._scaled_text_size(inning_label, label_scale)
+        _, half_height = self._font_text_size(half_label, self.font)
+        _, inning_height = self._inning_number_size(inning)
+        line_height = max(half_height, inning_height)
+        label_y = y + max(0, (line_height - label_height) // 2)
+        half_y = y + max(0, (line_height - half_height) // 2)
+        inning_y = y + max(0, (line_height - inning_height) // 2)
+
+        self._draw_scaled_text(
+            draw,
+            (x, label_y),
+            inning_label,
+            label_color,
+            label_scale,
+        )
+        half_x = x + label_width + label_gap
+        draw.text((half_x, half_y), half_label, fill=half_color, font=self.font)
         inning_x = half_x + self._text_width(half_label)
-        draw.text((inning_x, y), inning, fill=value_color, font=self.font)
+        self._draw_inning_number(draw, (inning_x, inning_y), inning, value_color)
 
     def _text_width(self, text: str) -> int:
         width, _ = self._font_text_size(text, self.font)
@@ -1324,10 +1344,11 @@ class MatrixRenderer:
         draw.bitmap(xy, mask, fill=fill)
 
     def _score_text_size(self, text: str) -> tuple[int, int]:
-        bbox = self.score_font.getbbox(text)
-        width = max(1, bbox[2] - bbox[0])
-        height = max(1, bbox[3] - bbox[1])
-        return width * SCORE_SCALE, height * SCORE_SCALE
+        return self._seven_segment_text_size(
+            text,
+            SEVEN_SEGMENT_SCORE_DIGIT_SIZE,
+            SEVEN_SEGMENT_DIGIT_GAP,
+        )
 
     def _draw_score_text(
         self,
@@ -1336,16 +1357,113 @@ class MatrixRenderer:
         text: str,
         fill: tuple[int, int, int],
     ) -> None:
-        bbox = self.score_font.getbbox(text)
-        width = max(1, bbox[2] - bbox[0])
-        height = max(1, bbox[3] - bbox[1])
-        mask = Image.new("L", (width, height), 0)
-        mask_draw = ImageDraw.Draw(mask)
-        mask_draw.text((-bbox[0], -bbox[1]), text, fill=255, font=self.score_font)
-        scaled_size = self._score_text_size(text)
-        if scaled_size != mask.size:
-            mask = mask.resize(scaled_size, Image.Resampling.NEAREST)
-        draw.bitmap(xy, mask, fill=fill)
+        self._draw_seven_segment_text(
+            draw,
+            xy,
+            text,
+            fill,
+            SEVEN_SEGMENT_SCORE_DIGIT_SIZE,
+            SEVEN_SEGMENT_SCORE_THICKNESS,
+            SEVEN_SEGMENT_DIGIT_GAP,
+        )
+
+    def _inning_number_size(self, text: str) -> tuple[int, int]:
+        return self._seven_segment_text_size(
+            text,
+            SEVEN_SEGMENT_INNING_DIGIT_SIZE,
+            1,
+        )
+
+    def _draw_inning_number(
+        self,
+        draw: ImageDraw.ImageDraw,
+        xy: tuple[int, int],
+        text: str,
+        fill: tuple[int, int, int],
+    ) -> None:
+        self._draw_seven_segment_text(
+            draw,
+            xy,
+            text,
+            fill,
+            SEVEN_SEGMENT_INNING_DIGIT_SIZE,
+            SEVEN_SEGMENT_INNING_THICKNESS,
+            1,
+        )
+
+    def _seven_segment_text_size(
+        self,
+        text: str,
+        digit_size: tuple[int, int],
+        gap: int,
+    ) -> tuple[int, int]:
+        if not text:
+            return 0, digit_size[1]
+        digit_width, digit_height = digit_size
+        width = len(text) * digit_width + max(0, len(text) - 1) * gap
+        return width, digit_height
+
+    def _draw_seven_segment_text(
+        self,
+        draw: ImageDraw.ImageDraw,
+        xy: tuple[int, int],
+        text: str,
+        fill: tuple[int, int, int],
+        digit_size: tuple[int, int],
+        thickness: int,
+        gap: int,
+    ) -> None:
+        x, y = xy
+        digit_width, _ = digit_size
+        for char in text:
+            self._draw_seven_segment_digit(
+                draw, (x, y), char, fill, digit_size, thickness
+            )
+            x += digit_width + gap
+
+    def _draw_seven_segment_digit(
+        self,
+        draw: ImageDraw.ImageDraw,
+        xy: tuple[int, int],
+        char: str,
+        fill: tuple[int, int, int],
+        digit_size: tuple[int, int],
+        thickness: int,
+    ) -> None:
+        segments_by_digit = {
+            "0": "abcfed",
+            "1": "bc",
+            "2": "abged",
+            "3": "abgcd",
+            "4": "fgbc",
+            "5": "afgcd",
+            "6": "afgecd",
+            "7": "abc",
+            "8": "abcdefg",
+            "9": "abfgcd",
+        }
+        active_segments = segments_by_digit.get(char)
+        if not active_segments:
+            return
+
+        x, y = xy
+        width, height = digit_size
+        t = max(1, thickness)
+        mid_y = y + height // 2
+        bottom_y = y + height - t
+        right_x = x + width - t
+
+        segment_rects = {
+            "a": (x + t, y, x + width - t - 1, y + t - 1),
+            "b": (right_x, y + t, x + width - 1, mid_y - 1),
+            "c": (right_x, mid_y + 1, x + width - 1, bottom_y - 1),
+            "d": (x + t, bottom_y, x + width - t - 1, y + height - 1),
+            "e": (x, mid_y + 1, x + t - 1, bottom_y - 1),
+            "f": (x, y + t, x + t - 1, mid_y - 1),
+            "g": (x + t, mid_y, x + width - t - 1, mid_y + t - 1),
+        }
+        for segment in active_segments:
+            draw.rectangle(segment_rects[segment], fill=fill)
 
     def _draw_team_panel(
         self,

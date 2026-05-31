@@ -204,9 +204,11 @@ class MatrixRendererColorTests(unittest.TestCase):
                 (170, 187, 204),
             )
 
-        self.assertEqual(draw_scaled_text.call_args.args[2], "INN")
-        self.assertEqual(draw_scaled_text.call_args.args[4], 0.5)
+        draw_scaled_text.assert_not_called()
         self.assertEqual(draw_text.call_args.args[1], "TOP ")
+        self.assertEqual(draw_text.call_args.args[0][0], 2)
+        self.assertEqual(draw_text.call_args.args[0][1], 2)
+        self.assertEqual(draw_inning_number.call_args.args[1][1], 1)
         self.assertEqual(draw_inning_number.call_args.args[2], "7")
         self.assertLess(
             draw_text.call_args.args[0][0],

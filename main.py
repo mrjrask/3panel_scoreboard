@@ -1449,10 +1449,16 @@ class MatrixRenderer:
         bottom_y = y + height - t
         right_x = x + width - t
 
+        is_one = char == "1"
         segment_rects = {
             "a": (x + t, y, x + width - t - 1, y + t - 1),
-            "b": (right_x, y + t, x + width - 1, mid_y - 1),
-            "c": (right_x, mid_y + 1, x + width - 1, bottom_y - 1),
+            "b": (right_x, y if is_one else y + t, x + width - 1, mid_y - 1),
+            "c": (
+                right_x,
+                mid_y + 1,
+                x + width - 1,
+                y + height - 1 if is_one else bottom_y - 1,
+            ),
             "d": (x + t, bottom_y, x + width - t - 1, y + height - 1),
             "e": (x, mid_y + 1, x + t - 1, bottom_y - 1),
             "f": (x, y + t, x + t - 1, mid_y - 1),

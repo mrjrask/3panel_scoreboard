@@ -1273,6 +1273,10 @@ class MatrixRenderer:
         value_color: tuple[int, int, int],
         half_color: tuple[int, int, int],
     ) -> None:
+        inning_label = "INN"
+        label_scale = 0.5
+        label_gap = 1
+        label_color = value_color
         half_label = f"{half} "
         label_width, label_height = self._scaled_text_size(inning_label, label_scale)
         _, half_height = self._font_text_size(half_label, self.font)

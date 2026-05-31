@@ -291,6 +291,33 @@ class MatrixRendererColorTests(unittest.TestCase):
         self.assertIn("12", seven_segment_values)
         self.assertIn("9", seven_segment_values)
 
+    def test_count_indicators_are_three_by_three_squares(self):
+        renderer = self._renderer_with_colors()
+        image = main.Image.new("RGB", (24, 12), (0, 0, 0))
+        draw = main.ImageDraw.Draw(image)
+        active_color = (255, 50, 50)
+
+        renderer._draw_count_dots(
+            draw,
+            0,
+            6,
+            "B",
+            1,
+            1,
+            (255, 255, 255),
+            active_color,
+            (48, 48, 48),
+        )
+
+        pixels = image.load()
+        active_pixels = sum(
+            1
+            for x in range(image.width)
+            for y in range(image.height)
+            if pixels[x, y] == active_color
+        )
+        self.assertEqual(active_pixels, 9)
+
 
 class ScoreboardStateLimitTests(unittest.TestCase):
     def test_inning_clamps_to_twenty(self):

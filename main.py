@@ -1531,7 +1531,7 @@ class MatrixRenderer:
         for idx in range(max_count):
             dot_x = x + 8 + (idx * 5)
             fill = active_color if idx < count else inactive_color
-            draw.ellipse((dot_x, y - 1, dot_x + 2, y + 1), fill=fill)
+            draw.rectangle((dot_x, y - 1, dot_x + 2, y + 1), fill=fill)
 
     def _draw_panel_test(self, draw: ImageDraw.ImageDraw) -> None:
         panel_w = max(1, self.display.width // 3)

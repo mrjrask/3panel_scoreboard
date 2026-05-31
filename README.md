@@ -72,7 +72,7 @@ python main.py --backend rgbmatrix --rgb-pixel-mapper 'U-mapper;Rotate:90'
 This Raspberry Pi/Triple Bonnet adaptation carries forward the manual baseball scoreboard controls from `mrjrask/scoreboard_i75w`:
 
 - Away and home team names up to 10 characters (defaults: `AWAY TEAM` and `HOME TEAM`).
-- Per-section color controls for away/home names and scores, inning label/value, and count labels.
+- Per-section color controls for away/home names and scores, inning value and count labels.
 - Team score increment/decrement controls.
 - Inning increment/decrement controls and top/bottom toggle.
 - Balls (0-3), strikes (0-2), and outs (0-2), including baseball-style strikeout/out advancement and half-inning rollover after three outs.

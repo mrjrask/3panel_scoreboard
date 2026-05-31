@@ -34,7 +34,6 @@ DEFAULT_TEXT_COLORS = {
     "team_a_score": "#FFB400",
     "team_b_name": "#FFFFFF",
     "team_b_score": "#FFFFFF",
-    "inning_label": "#FFFFFF",
     "inning_value": "#FFFFFF",
     "count_labels": "#3CFF3C",
 }
@@ -1172,7 +1171,6 @@ class MatrixRenderer:
                     y + 2,
                     str(self.state.inning),
                     half,
-                    colors["inning_label"],
                     colors["inning_value"],
                     half_color,
                 )
@@ -1222,7 +1220,6 @@ class MatrixRenderer:
                     1,
                     str(self.state.inning),
                     half,
-                    colors["inning_label"],
                     colors["inning_value"],
                     half_color,
                 )
@@ -1268,26 +1265,11 @@ class MatrixRenderer:
         y: int,
         inning: str,
         half: str,
-        label_color: tuple[int, int, int],
         value_color: tuple[int, int, int],
         half_color: tuple[int, int, int],
     ) -> None:
-        inning_label = "INN"
-        label_scale = 0.5
-        label_gap = 1
         half_label = f"{half} "
-        label_width, label_height = self._scaled_text_size(inning_label, label_scale)
-        _, line_height = self._font_text_size(half_label + inning, self.font)
-        label_y = y + max(0, (line_height - label_height) // 2)
-
-        self._draw_scaled_text(
-            draw,
-            (x, label_y),
-            inning_label,
-            label_color,
-            label_scale,
-        )
-        half_x = x + label_width + label_gap
+        half_x = x
         draw.text((half_x, y), half_label, fill=half_color, font=self.font)
         inning_x = half_x + self._text_width(half_label)
         draw.text((inning_x, y), inning, fill=value_color, font=self.font)
@@ -1737,7 +1719,6 @@ def create_app(state: ScoreboardState, renderer: MatrixRenderer) -> Flask:
         ("team_a_score", "Away Team Score"),
         ("team_b_name", "Home Team Name"),
         ("team_b_score", "Home Team Score"),
-        ("inning_label", "Inning Label"),
         ("inning_value", "Inning Value"),
         ("count_labels", "Count Labels"),
     ]

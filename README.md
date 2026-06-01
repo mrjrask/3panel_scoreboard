@@ -137,6 +137,18 @@ Directories need the execute/traverse bit and the `.bdf` files need the read bit
 ## Geometry and panel scan notes
 
 - Default display shape is 192x32 (3x panels across).
+- If the same three physical 64x32 panels are mounted as vertical screens, use `--vertical-screen` to render each panel as a logical 32x64 screen and rotate each panel image onto the hardware before display:
+
+```bash
+python main.py --vertical-screen
+```
+
+  `--vertical-screen` is a shortcut for `--screen-orientation vertical-cw`. If your mounted panels are rotated the opposite direction, use:
+
+```bash
+python main.py --screen-orientation vertical-ccw
+```
+
 - Override geometry if needed:
 
 ```bash

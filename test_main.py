@@ -190,6 +190,55 @@ class MatrixDisplayMirrorChainTests(unittest.TestCase):
             self.assertEqual(pixels[74, y], color)
 
 
+class RotatedPanelDisplayTests(unittest.TestCase):
+    class FakePhysicalDisplay:
+        width = 192
+        height = 32
+        backend_name = "fake"
+
+        def __init__(self):
+            self.images = []
+
+        def show(self, image, brightness):
+            self.images.append((image.copy(), brightness))
+
+    def test_vertical_screen_rotates_each_logical_panel_clockwise(self):
+        physical_display = self.FakePhysicalDisplay()
+        display = main.RotatedPanelDisplay(
+            physical_display, 64, 32, 3, 1, "vertical-cw"
+        )
+        self.assertEqual((display.width, display.height), (96, 64))
+
+        source = main.Image.new("RGB", (96, 64), (0, 0, 0))
+        pixels = source.load()
+        pixels[0, 0] = (255, 0, 0)
+        pixels[32, 0] = (0, 220, 0)
+        pixels[64, 0] = (0, 90, 255)
+
+        display.show(source, 42)
+
+        physical, brightness = physical_display.images[-1]
+        self.assertEqual(brightness, 42)
+        self.assertEqual(physical.size, (192, 32))
+        physical_pixels = physical.load()
+        self.assertEqual(physical_pixels[63, 0], (255, 0, 0))
+        self.assertEqual(physical_pixels[127, 0], (0, 220, 0))
+        self.assertEqual(physical_pixels[191, 0], (0, 90, 255))
+
+    def test_vertical_screen_rotates_each_logical_panel_counterclockwise(self):
+        physical_display = self.FakePhysicalDisplay()
+        display = main.RotatedPanelDisplay(
+            physical_display, 64, 32, 3, 1, "vertical-ccw"
+        )
+        source = main.Image.new("RGB", (96, 64), (0, 0, 0))
+        source.putpixel((0, 0), (255, 0, 0))
+
+        display.show(source, 70)
+
+        physical = physical_display.images[-1][0]
+        self.assertEqual(physical.getpixel((0, 31)), (255, 0, 0))
+
+
 class MatrixRendererColorTests(unittest.TestCase):
     class FakeDisplay:
         def __init__(self, width, height):
@@ -405,6 +454,39 @@ class MatrixRendererColorTests(unittest.TestCase):
             if pixels[x, y] == active_color
         )
         self.assertEqual(active_pixels, 9)
+
+    def test_vertical_screen_team_panels_place_name_score_and_batting_order(self):
+        renderer = self._renderer_with_colors(width=96, height=64)
+
+        with (
+            mock.patch.object(renderer, "_draw_clipped_team_name") as draw_team_name,
+            mock.patch.object(renderer, "_draw_score_text") as draw_score_text,
+            mock.patch.object(renderer, "_draw_batting_order") as draw_batting_order,
+        ):
+            renderer.draw_mode()
+
+        self.assertEqual(draw_team_name.call_args_list[0].args[1], (2, 0))
+        self.assertEqual(draw_team_name.call_args_list[1].args[1], (34, 0))
+        self.assertEqual(draw_score_text.call_args_list[0].args[1][1], 20)
+        self.assertEqual(draw_score_text.call_args_list[1].args[1][1], 20)
+        self.assertEqual(draw_batting_order.call_args_list[0].args[2], 63)
+        self.assertEqual(draw_batting_order.call_args_list[1].args[2], 63)
+
+    def test_vertical_screen_info_panel_places_inning_at_top_and_stacks_counts(self):
+        renderer = self._renderer_with_colors(width=96, height=64)
+
+        with (
+            mock.patch.object(renderer, "_draw_inning_line") as draw_inning_line,
+            mock.patch.object(renderer, "_draw_count_dots") as draw_count_dots,
+        ):
+            renderer.draw_mode()
+
+        self.assertEqual(draw_inning_line.call_args.args[1:5], (66, 0, "1", "TOP"))
+        count_positions = [
+            (call.args[1], call.args[2], call.args[3])
+            for call in draw_count_dots.call_args_list
+        ]
+        self.assertEqual(count_positions, [(66, 27, "B"), (66, 41, "S"), (66, 55, "O")])
 
 
 class ScoreboardStateLimitTests(unittest.TestCase):

@@ -1117,6 +1117,66 @@ class MatrixDisplay:
         )
 
 
+class RotatedPanelDisplay:
+    """Render each physical panel as a rotated logical vertical screen.
+
+    The LED drivers still receive the physical geometry (for example three
+    64x32 panels across), while the renderer sees each panel as the swapped
+    logical geometry (32x64).  Frames are rotated panel-by-panel before they are
+    forwarded to the real display so the three panels can be mounted vertically
+    without relying on a backend-specific pixel mapper.
+    """
+
+    def __init__(
+        self,
+        display: MatrixDisplay,
+        panel_width: int,
+        panel_height: int,
+        chain_across: int,
+        chain_down: int,
+        orientation: str,
+    ):
+        self._display = display
+        self.physical_width = display.width
+        self.physical_height = display.height
+        self.panel_width = panel_width
+        self.panel_height = panel_height
+        self.chain_across = chain_across
+        self.chain_down = chain_down
+        if orientation not in {"vertical-cw", "vertical-ccw"}:
+            raise ValueError(f"Unsupported rotated panel orientation: {orientation}")
+        self.orientation = orientation
+        self.width = panel_height * chain_across
+        self.height = panel_width * chain_down
+
+    @property
+    def backend_name(self) -> str:
+        return self._display.backend_name
+
+    def show(self, image: Image.Image, brightness: int) -> None:
+        if image.size != (self.width, self.height):
+            image = image.resize((self.width, self.height), Image.Resampling.NEAREST)
+        physical = Image.new(
+            "RGB", (self.physical_width, self.physical_height), (0, 0, 0)
+        )
+        for panel_y in range(self.chain_down):
+            for panel_x in range(self.chain_across):
+                logical_box = (
+                    panel_x * self.panel_height,
+                    panel_y * self.panel_width,
+                    (panel_x + 1) * self.panel_height,
+                    (panel_y + 1) * self.panel_width,
+                )
+                panel_image = image.crop(logical_box)
+                angle = -90 if self.orientation == "vertical-cw" else 90
+                rotated = panel_image.rotate(angle, expand=True)
+                physical.paste(
+                    rotated,
+                    (panel_x * self.panel_width, panel_y * self.panel_height),
+                )
+        self._display.show(physical, brightness)
+
+
 class MatrixRenderer:
     def __init__(self, display: MatrixDisplay, state: ScoreboardState):
         self.display = display
@@ -1222,6 +1282,12 @@ class MatrixRenderer:
             else:
                 panel_w = self.display.width // 3
                 half = "TOP" if self.state.inning_half == "top" else "BOT"
+                if panel_w <= 32 and self.display.height >= 64:
+                    self._draw_narrow_vertical_screen_layout(
+                        draw, panel_w, half, colors, red, dim
+                    )
+                    self.display.show(image, self.state.brightness)
+                    return
                 self._draw_team_panel(
                     draw,
                     0,
@@ -1495,6 +1561,133 @@ class MatrixRenderer:
         }
         for segment in active_segments:
             draw.rectangle(segment_rects[segment], fill=fill)
+
+    def _draw_narrow_vertical_screen_layout(
+        self,
+        draw: ImageDraw.ImageDraw,
+        panel_w: int,
+        half: str,
+        colors: dict[str, tuple[int, int, int]],
+        red: tuple[int, int, int],
+        dim: tuple[int, int, int],
+    ) -> None:
+        self._draw_vertical_screen_team_panel(
+            draw,
+            0,
+            panel_w,
+            self.state.team_a,
+            self.state.score_a,
+            "team_a_name",
+            "team_a_score",
+            self.state.current_batter_a,
+            self.state.batting_order_a,
+            colors,
+            dim,
+        )
+        self._draw_vertical_screen_team_panel(
+            draw,
+            panel_w,
+            panel_w,
+            self.state.team_b,
+            self.state.score_b,
+            "team_b_name",
+            "team_b_score",
+            self.state.current_batter_b,
+            self.state.batting_order_b,
+            colors,
+            dim,
+        )
+        info_x = panel_w * 2 + 2
+        half_color = colors["inning_value"]
+        self._draw_inning_line(
+            draw,
+            info_x,
+            0,
+            str(self.state.inning),
+            half,
+            colors["inning_value"],
+            half_color,
+        )
+        count_y = 27
+        self._draw_count_dots(
+            draw,
+            info_x,
+            count_y,
+            "B",
+            self.state.balls,
+            3,
+            colors["count_labels"],
+            red,
+            dim,
+        )
+        self._draw_count_dots(
+            draw,
+            info_x,
+            count_y + 14,
+            "S",
+            self.state.strikes,
+            2,
+            colors["count_labels"],
+            red,
+            dim,
+        )
+        self._draw_count_dots(
+            draw,
+            info_x,
+            count_y + 28,
+            "O",
+            self.state.outs,
+            2,
+            colors["count_labels"],
+            red,
+            dim,
+        )
+
+    def _draw_vertical_screen_team_panel(
+        self,
+        draw: ImageDraw.ImageDraw,
+        x: int,
+        width: int,
+        team: str,
+        score: int,
+        name_key: str,
+        score_key: str,
+        current_batter: int,
+        lineup_size: int,
+        colors: dict[str, tuple[int, int, int]],
+        dim: tuple[int, int, int],
+    ) -> None:
+        self._draw_clipped_team_name(
+            draw, (x + 2, 0), team, width - 4, colors[name_key]
+        )
+        score_text = str(score)
+        score_width, score_height = self._score_text_size(score_text)
+        score_x = x + max(2, (width - score_width) // 2)
+        score_y = max(0, (self.display.height - score_height) // 2)
+        self._draw_score_text(draw, (score_x, score_y), score_text, colors[score_key])
+        if self.state.batting_order_enabled:
+            self._draw_batting_order(
+                draw,
+                x + 2,
+                self._batting_order_y(0, self.display.height),
+                lineup_size,
+                current_batter,
+                colors[name_key],
+                dim,
+            )
+
+    def _draw_clipped_team_name(
+        self,
+        draw: ImageDraw.ImageDraw,
+        xy: tuple[int, int],
+        text: str,
+        max_width: int,
+        fill: tuple[int, int, int],
+    ) -> None:
+        clipped = text
+        while clipped and self._team_name_size(clipped)[0] > max_width:
+            clipped = clipped[:-1]
+        self._draw_team_name(draw, xy, clipped or text[:1], fill)
 
     def _draw_team_panel(
         self,
@@ -1951,6 +2144,23 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--panel-width", type=int, default=64)
     p.add_argument("--panel-height", type=int, default=32)
+    p.add_argument(
+        "--screen-orientation",
+        choices=("horizontal", "vertical-cw", "vertical-ccw"),
+        default="horizontal",
+        help=(
+            "Logical screen orientation. Use vertical-cw or vertical-ccw to render "
+            "each physical panel as a 32x64 vertical screen and rotate it onto "
+            "the 64x32 hardware."
+        ),
+    )
+    p.add_argument(
+        "--vertical-screen",
+        dest="screen_orientation",
+        action="store_const",
+        const="vertical-cw",
+        help="Shortcut for --screen-orientation vertical-cw.",
+    )
     # Triple Bonnet default: 3 panels side-by-side (192x32 total).
     p.add_argument("--chain-across", type=int, default=3)
     p.add_argument("--chain-down", type=int, default=1)
@@ -2073,9 +2283,19 @@ def main() -> None:
     set_state_file(args.state_file)
     state = load_state()
     state.brightness = args.brightness
-    width = args.panel_width * args.chain_across
-    height = args.panel_height * args.chain_down
-    if args.chain_across == 1 and args.chain_down == 3:
+    physical_width = args.panel_width * args.chain_across
+    physical_height = args.panel_height * args.chain_down
+    render_width = physical_width
+    render_height = physical_height
+    if args.screen_orientation != "horizontal":
+        render_width = args.panel_height * args.chain_across
+        render_height = args.panel_width * args.chain_down
+    if args.screen_orientation != "horizontal":
+        print(
+            f"[scoreboard] Using vertical screen orientation "
+            f"({args.panel_height}x{args.panel_width} logical panels)."
+        )
+    elif args.chain_across == 1 and args.chain_down == 3:
         print("[scoreboard] Using vertical geometry (64x96).")
     elif args.chain_across == 3 and args.chain_down == 1:
         print("[scoreboard] Using horizontal geometry (192x32).")
@@ -2083,7 +2303,8 @@ def main() -> None:
         args.panel_height, args.panel_scan, args.addr_lines
     )
     print(
-        f"[scoreboard] geometry={width}x{height} panel={args.panel_width}x{args.panel_height} "
+        f"[scoreboard] geometry={physical_width}x{physical_height} render={render_width}x{render_height} "
+        f"panel={args.panel_width}x{args.panel_height} orientation={args.screen_orientation} "
         f"backend={args.backend} scan={args.panel_scan} addr_lines={inferred_addr_lines} "
         f"serpentine={args.serpentine} pinout={args.pinout} "
         f"rgb_layout={args.rgb_layout} rgb_multiplexing={args.rgb_multiplexing} "
@@ -2094,8 +2315,8 @@ def main() -> None:
         "[scoreboard] Default panel-scan is 1/8 for this repo. Use --panel-scan auto|1/16|1/32 or --addr-lines to match other panel types."
     )
     display = MatrixDisplay(
-        width,
-        height,
+        physical_width,
+        physical_height,
         args.bit_depth,
         args.chain_across,
         args.chain_down,
@@ -2114,6 +2335,15 @@ def main() -> None:
         args.rgb_mirror_chain_length,
         args.rgb_no_hardware_pulse,
     )
+    if args.screen_orientation != "horizontal":
+        display = RotatedPanelDisplay(
+            display,
+            args.panel_width,
+            args.panel_height,
+            args.chain_across,
+            args.chain_down,
+            args.screen_orientation,
+        )
     renderer = MatrixRenderer(display, state)
     if args.test_pattern == "panel":
         renderer.draw_mode("panel_test")

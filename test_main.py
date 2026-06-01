@@ -1,6 +1,8 @@
 import errno
 import json
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -54,11 +56,14 @@ class SaveStateTests(unittest.TestCase):
         main.set_state_file(state_file)
 
         state = main.ScoreboardState(score_a=9, score_b=8)
-        with mock.patch.object(
-            main.os,
-            "fsync",
-            side_effect=OSError(errno.ENOSPC, "No space left on device"),
-        ), self.assertLogs(main.LOGGER, level="ERROR") as logs:
+        with (
+            mock.patch.object(
+                main.os,
+                "fsync",
+                side_effect=OSError(errno.ENOSPC, "No space left on device"),
+            ),
+            self.assertLogs(main.LOGGER, level="ERROR") as logs,
+        ):
             main.save_state(state)
 
         self.assertEqual(state_file.read_text(), original_payload)
@@ -72,11 +77,14 @@ class SaveStateTests(unittest.TestCase):
         main.set_state_file(state_file)
 
         state = main.ScoreboardState(score_a=4, score_b=3)
-        with mock.patch.object(
-            main.tempfile,
-            "mkstemp",
-            side_effect=OSError(errno.ENOSPC, "No space left on device"),
-        ), self.assertLogs(main.LOGGER, level="ERROR") as logs:
+        with (
+            mock.patch.object(
+                main.tempfile,
+                "mkstemp",
+                side_effect=OSError(errno.ENOSPC, "No space left on device"),
+            ),
+            self.assertLogs(main.LOGGER, level="ERROR") as logs,
+        ):
             main.save_state(state)
 
         self.assertEqual(state_file.read_text(), original_payload)
@@ -98,9 +106,7 @@ class SaveStateTests(unittest.TestCase):
         state = main.ScoreboardState(score_a=11, score_b=10)
         with (
             mock.patch.dict(main.os.environ, {"XDG_STATE_HOME": str(fallback_home)}),
-            mock.patch.object(
-                main.tempfile, "mkstemp", side_effect=fail_primary_only
-            ),
+            mock.patch.object(main.tempfile, "mkstemp", side_effect=fail_primary_only),
             self.assertLogs(main.LOGGER, level="WARNING") as logs,
         ):
             main.save_state(state)
@@ -136,6 +142,52 @@ class MatrixFontLoadingTests(unittest.TestCase):
 
         self.assertEqual(len(font.getbbox("ABC")), 4)
         self.assertIn("Unable to load matrix font", "\n".join(logs.output))
+
+
+class MatrixDisplayMirrorChainTests(unittest.TestCase):
+    def test_rgbmatrix_parallel_ports_mirrors_each_panel_to_chained_output(self):
+        captured_options = []
+
+        class FakeRGBMatrixOptions:
+            pass
+
+        class FakeRGBMatrix:
+            def __init__(self, options):
+                captured_options.append(options)
+
+        fake_rgbmatrix = types.SimpleNamespace(
+            RGBMatrix=FakeRGBMatrix, RGBMatrixOptions=FakeRGBMatrixOptions
+        )
+
+        with mock.patch.dict(sys.modules, {"rgbmatrix": fake_rgbmatrix}):
+            display = main.MatrixDisplay(
+                192,
+                32,
+                6,
+                3,
+                1,
+                backend="rgbmatrix",
+                rgb_mirror_chain_length=2,
+            )
+
+        self.assertEqual(captured_options[0].chain_length, 2)
+        self.assertEqual(captured_options[0].parallel, 3)
+        self.assertEqual(captured_options[0].rows, 32)
+        self.assertEqual(captured_options[0].cols, 64)
+
+        source = main.Image.new("RGB", (192, 32), (0, 0, 0))
+        draw = main.ImageDraw.Draw(source)
+        panel_colors = ((255, 0, 0), (0, 220, 0), (0, 90, 255))
+        for idx, color in enumerate(panel_colors):
+            draw.rectangle((idx * 64, 0, idx * 64 + 63, 31), fill=color)
+
+        remapped = display._prepare_rgbmatrix_image(source)
+        self.assertEqual(remapped.size, (128, 96))
+        pixels = remapped.load()
+        for row, color in enumerate(panel_colors):
+            y = row * 32 + 10
+            self.assertEqual(pixels[10, y], color)
+            self.assertEqual(pixels[74, y], color)
 
 
 class MatrixRendererColorTests(unittest.TestCase):

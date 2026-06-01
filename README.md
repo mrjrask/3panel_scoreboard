@@ -54,7 +54,15 @@ python main.py --backend rgbmatrix \
   --rgb-row-addr-type 0
 ```
 
-That creates the equivalent of `--rgb-parallel 3 --rgb-chain-length 1` automatically for the default `--chain-across 3 --chain-down 1` geometry. Do not use `--rgb-gpio-mapping adafruit-hat` for this three-output mode; the single-output Adafruit HAT/Bonnet mapping only supports `--rgb-parallel 1`. If you instead daisy-chain panels from one HUB75 output, use:
+That creates the equivalent of `--rgb-parallel 3 --rgb-chain-length 1` automatically for the default `--chain-across 3 --chain-down 1` geometry. To add one extra panel to the output connector of each directly connected Triple Bonnet panel and mirror the same content onto the chained panel, keep the logical scoreboard geometry at 192x32 and set the mirror chain length to 2:
+
+```bash
+python main.py --backend rgbmatrix --rgb-mirror-chain-length 2
+```
+
+With the default geometry, that drives the equivalent of `--rgb-parallel 3 --rgb-chain-length 2` on the hardware while duplicating each 64x32 logical panel image into both physical panels on that output chain. Use a larger mirror chain length only if every output has more mirrored panels in the chain.
+
+Do not use `--rgb-gpio-mapping adafruit-hat` for this three-output mode; the single-output Adafruit HAT/Bonnet mapping only supports `--rgb-parallel 1`. If you instead daisy-chain three unique scoreboard panels from one HUB75 output, use:
 
 ```bash
 python main.py --backend rgbmatrix --rgb-layout daisy-chain --rgb-parallel 1 --rgb-chain-length 3
@@ -156,6 +164,8 @@ python main.py --addr-lines 4
 ```
 
 - For Adafruit Triple LED Matrix Bonnet with one panel directly on each of the 3 bonnet ports, keep `--serpentine` OFF (default) for the Piomatter backend.
+
+- For Pi 4 / `rpi-rgb-led-matrix`, `--rgb-mirror-chain-length 2` supports one mirrored daisy-chained panel on each Triple Bonnet output without changing the 192x32 web UI or scoreboard layout.
 
 - If panel wiring snakes between connectors (daisy-chained/snake layout), try enabling serpentine layout for the Piomatter backend:
 

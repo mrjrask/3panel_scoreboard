@@ -16,7 +16,6 @@ from pathlib import Path
 from flask import Flask, jsonify, redirect, render_template_string, request
 from PIL import BdfFontFile, Image, ImageDraw, ImageFont
 
-
 DEFAULT_STATE_FILE = Path("scoreboard_state.json")
 STATE_FILE = Path(os.environ.get("SCOREBOARD_STATE_FILE", DEFAULT_STATE_FILE))
 FONT_FILE = Path(__file__).resolve().parent / "fonts" / "6x10.bdf"
@@ -452,7 +451,9 @@ def save_state(state: ScoreboardState) -> None:
         _save_state_payload_to_path(STATE_FILE, state_payload)
     except OSError as exc:
         can_use_fallback_path = _can_fallback_to_alternate_state_file(exc)
-        if can_use_fallback_path and _save_state_payload_to_fallback(state_payload, exc):
+        if can_use_fallback_path and _save_state_payload_to_fallback(
+            state_payload, exc
+        ):
             return
         LOGGER.error(
             "Unable to save scoreboard state to %s: atomic save failed: %s. "
@@ -550,12 +551,15 @@ class MatrixDisplay:
         rgb_parallel: int | None = None,
         rgb_pixel_mapper: str = "",
         rgb_layout: str = "parallel-ports",
+        rgb_mirror_chain_length: int = 1,
         rgb_no_hardware_pulse: bool = False,
     ):
         self.width = width
         self.height = height
         self._framebuffer: bytearray | None = None
-        self._rgbmatrix_panel_remap: tuple[int, int, int, int, int, int] | None = None
+        self._rgbmatrix_panel_remap: tuple[int, int, int, int, int, int, int] | None = (
+            None
+        )
         self.backend_name: str = "unknown"
         self._driver = self._init_driver(
             width,
@@ -575,6 +579,7 @@ class MatrixDisplay:
             rgb_parallel,
             rgb_pixel_mapper,
             rgb_layout,
+            rgb_mirror_chain_length,
             rgb_no_hardware_pulse,
         )
 
@@ -597,6 +602,7 @@ class MatrixDisplay:
         rgb_parallel: int | None,
         rgb_pixel_mapper: str,
         rgb_layout: str,
+        rgb_mirror_chain_length: int,
         rgb_no_hardware_pulse: bool,
     ):
         def _pick_enum(default_name: str, enum_obj, fallbacks: tuple[str, ...]):
@@ -652,6 +658,7 @@ class MatrixDisplay:
                 rgb_parallel,
                 rgb_pixel_mapper,
                 rgb_layout,
+                rgb_mirror_chain_length,
                 rgb_no_hardware_pulse,
             )
 
@@ -898,6 +905,7 @@ class MatrixDisplay:
                     rgb_parallel,
                     rgb_pixel_mapper,
                     rgb_layout,
+                    rgb_mirror_chain_length,
                     rgb_no_hardware_pulse,
                 )
             except Exception as exc:
@@ -925,6 +933,7 @@ class MatrixDisplay:
         parallel_override: int | None,
         pixel_mapper: str,
         layout: str,
+        mirror_chain_length: int,
         no_hardware_pulse: bool,
     ):
         from rgbmatrix import RGBMatrix, RGBMatrixOptions
@@ -932,6 +941,7 @@ class MatrixDisplay:
         panel_cols = max(1, width // max(1, chain_across))
         panel_rows = max(1, height // max(1, chain_down))
         panel_count = max(1, chain_across * chain_down)
+        mirror_chain_length = max(1, int(mirror_chain_length))
 
         if layout == "parallel-ports":
             parallel = max(
@@ -942,8 +952,17 @@ class MatrixDisplay:
             )
             chain_length = max(
                 1,
-                int(chain_length_override if chain_length_override is not None else 1),
+                int(
+                    chain_length_override
+                    if chain_length_override is not None
+                    else mirror_chain_length
+                ),
             )
+            if mirror_chain_length > 1 and chain_length < mirror_chain_length:
+                raise ValueError(
+                    "--rgb-chain-length must be at least --rgb-mirror-chain-length "
+                    "when mirrored daisy-chain output is enabled"
+                )
             rows = panel_rows
             cols = panel_cols
         else:
@@ -973,7 +992,11 @@ class MatrixDisplay:
                 "set --chain-across/--chain-down for a single output."
             )
 
-        if layout == "parallel-ports" and chain_length == 1 and parallel == panel_count:
+        if (
+            layout == "parallel-ports"
+            and parallel == panel_count
+            and (chain_length == 1 or mirror_chain_length > 1)
+        ):
             canvas_width = cols * chain_length
             canvas_height = rows * parallel
             if (canvas_width, canvas_height) != (width, height):
@@ -982,6 +1005,7 @@ class MatrixDisplay:
                     chain_down,
                     panel_cols,
                     panel_rows,
+                    chain_length,
                     canvas_width,
                     canvas_height,
                 )
@@ -1047,6 +1071,7 @@ class MatrixDisplay:
             chain_down,
             panel_cols,
             panel_rows,
+            chain_length,
             canvas_width,
             canvas_height,
         ) = self._rgbmatrix_panel_remap
@@ -1060,7 +1085,12 @@ class MatrixDisplay:
                     (panel_x + 1) * panel_cols,
                     (panel_y + 1) * panel_rows,
                 )
-                remapped.paste(rgb_image.crop(src_box), (0, panel_index * panel_rows))
+                panel_image = rgb_image.crop(src_box)
+                for chain_index in range(chain_length):
+                    remapped.paste(
+                        panel_image,
+                        (chain_index * panel_cols, panel_index * panel_rows),
+                    )
         return remapped
 
     def _blit_to_framebuffer(self, image: Image.Image) -> None:
@@ -1295,9 +1325,7 @@ class MatrixRenderer:
         width, _ = self._font_text_size(text, self.font)
         return width
 
-    def _font_text_size(
-        self, text: str, font: ImageFont.ImageFont
-    ) -> tuple[int, int]:
+    def _font_text_size(self, text: str, font: ImageFont.ImageFont) -> tuple[int, int]:
         bbox = font.getbbox(text)
         width = max(1, bbox[2] - bbox[0])
         height = max(1, bbox[3] - bbox[1])
@@ -1998,6 +2026,12 @@ def parse_args() -> argparse.Namespace:
         help="rpi-rgb-led-matrix pixel mapper config, e.g. 'U-mapper;Rotate:90'",
     )
     p.add_argument(
+        "--rgb-mirror-chain-length",
+        type=int,
+        default=1,
+        help="For rpi-rgb-led-matrix parallel-ports topology, duplicate each logical panel across this many daisy-chained physical panels on the same HUB75 output (set 2 for one mirrored chained panel)",
+    )
+    p.add_argument(
         "--led-no-hardware-pulse",
         "--rgb-no-hardware-pulse",
         dest="rgb_no_hardware_pulse",
@@ -2053,6 +2087,7 @@ def main() -> None:
         f"backend={args.backend} scan={args.panel_scan} addr_lines={inferred_addr_lines} "
         f"serpentine={args.serpentine} pinout={args.pinout} "
         f"rgb_layout={args.rgb_layout} rgb_multiplexing={args.rgb_multiplexing} "
+        f"rgb_mirror_chain_length={args.rgb_mirror_chain_length} "
         f"rgb_no_hardware_pulse={args.rgb_no_hardware_pulse}"
     )
     print(
@@ -2076,6 +2111,7 @@ def main() -> None:
         args.rgb_parallel,
         args.rgb_pixel_mapper,
         args.rgb_layout,
+        args.rgb_mirror_chain_length,
         args.rgb_no_hardware_pulse,
     )
     renderer = MatrixRenderer(display, state)

@@ -21,6 +21,7 @@ echo "Ensuring bundled fonts are readable by the runtime service..."
 # Pillow can load the crisp matrix fonts instead of falling back to its default.
 find "$REPO_DIR" -type d -exec chmod a+rx {} +
 find "$REPO_DIR/fonts" -type f -name '*.bdf' -exec chmod a+r {} +
+chmod a+rx "$REPO_DIR/scoreboard"
 
 python -m pip install --upgrade pip wheel setuptools
 python -m pip install -r "$REPO_DIR/requirements.txt"
@@ -29,8 +30,12 @@ python -m pip install "git+$PIOMATTER_REPO"
 cat <<MSG
 
 Install complete for Raspberry Pi 5 / Blinka Piomatter.
-Run as script:
-  sudo -E env PATH="$VENV_DIR/bin:\$PATH" python "$REPO_DIR/main.py" --backend piomatter
+Run manually with the short launcher:
+  "$REPO_DIR/scoreboard" --backend piomatter
+
+Optional global command symlink:
+  sudo ln -sf "$REPO_DIR/scoreboard" /usr/local/bin/scoreboard
+  scoreboard --backend piomatter
 
 Install service:
   sudo cp "$REPO_DIR/systemd/scoreboard.service" /etc/systemd/system/scoreboard.service

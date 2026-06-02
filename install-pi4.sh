@@ -34,6 +34,7 @@ echo "Ensuring bundled fonts are readable by the runtime service..."
 # Pillow can load the crisp matrix fonts instead of falling back to its default.
 find "$REPO_DIR" -type d -exec chmod a+rx {} +
 find "$REPO_DIR/fonts" -type f -name '*.bdf' -exec chmod a+r {} +
+chmod a+rx "$REPO_DIR/scoreboard"
 
 python -m pip install --upgrade pip wheel setuptools
 python -m pip install -r "$REPO_DIR/requirements.txt"
@@ -42,11 +43,12 @@ python -m pip install "git+$RGB_MATRIX_REPO"
 cat <<MSG
 
 Install complete for Raspberry Pi 4 / rpi-rgb-led-matrix.
-Run as script:
-  sudo -E env PATH="$VENV_DIR/bin:\$PATH" python "$REPO_DIR/main.py" --backend rgbmatrix
+Run manually with the short launcher (includes --led-no-hardware-pulse automatically):
+  "$REPO_DIR/scoreboard"
 
-If startup reports that snd_bcm2835 is loaded, disable built-in Pi audio or use:
-  sudo -E env PATH="$VENV_DIR/bin:\$PATH" python "$REPO_DIR/main.py" --backend rgbmatrix --led-no-hardware-pulse
+Optional global command symlink:
+  sudo ln -sf "$REPO_DIR/scoreboard" /usr/local/bin/scoreboard
+  scoreboard
 
 Install service:
   sudo cp "$REPO_DIR/systemd/scoreboard.service" /etc/systemd/system/scoreboard.service

@@ -1,5 +1,6 @@
 import errno
 import json
+import subprocess
 import sys
 import tempfile
 import types
@@ -666,6 +667,40 @@ class ConfigRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(state.brightness, 42)
         self.assertEqual(renderer.draw_calls, 1)
+
+
+class ScoreboardLauncherTests(unittest.TestCase):
+    def _launcher_command(self, *args):
+        launcher = Path(__file__).with_name("scoreboard")
+        result = subprocess.run(
+            [
+                str(launcher),
+                "--print-command",
+                "--repo-dir",
+                "/opt/scoreboard",
+                "--venv",
+                "/opt/scoreboard/.venv",
+                *args,
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        return result.stdout.strip()
+
+    def test_launcher_default_includes_rgbmatrix_and_no_hardware_pulse(self):
+        command = self._launcher_command()
+
+        self.assertIn("--backend rgbmatrix", command)
+        self.assertIn("--led-no-hardware-pulse", command)
+        self.assertIn("/opt/scoreboard/main.py", command)
+
+    def test_launcher_two_panel_vertical_ccw_preset_expands_layout_flags(self):
+        command = self._launcher_command("2v-ccw", "--port", "8081")
+
+        self.assertIn("--two-panel", command)
+        self.assertIn("--screen-orientation vertical-ccw", command)
+        self.assertIn("--port 8081", command)
 
 
 if __name__ == "__main__":

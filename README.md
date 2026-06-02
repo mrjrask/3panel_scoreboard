@@ -11,16 +11,47 @@ Two Raspberry Pi installers are provided:
 - **Raspberry Pi 5:** `install-pi5.sh` installs the Adafruit Blinka Raspberry Pi5 Piomatter driver.
 - **Raspberry Pi 4:** `install-pi4.sh` installs the `rpi-rgb-led-matrix` Python bindings from <https://github.com/hzeller/rpi-rgb-led-matrix.git>.
 
+## Easy manual launch
+
+Use the included `scoreboard` launcher instead of typing the full `sudo -E env PATH=... python main.py ...` command. The launcher always includes `--led-no-hardware-pulse` (also known as `--rgb-no-hardware-pulse`) so Pi 4 / `rpi-rgb-led-matrix` launches consistently avoid the Pi audio/PWM hardware-pulse conflict.
+
+From the repository directory, the common manual launch commands are:
+
+| Command | Layout | Expands to the important app flags |
+| --- | --- | --- |
+| `./scoreboard` or `./scoreboard 3` | Three-panel horizontal default | `--backend rgbmatrix --led-no-hardware-pulse` |
+| `./scoreboard 3v` | Three-panel rotated clockwise | `--backend rgbmatrix --led-no-hardware-pulse --vertical-screen` |
+| `./scoreboard 3v-ccw` | Three-panel rotated counter-clockwise | `--backend rgbmatrix --led-no-hardware-pulse --screen-orientation vertical-ccw` |
+| `./scoreboard 2` | Two-panel horizontal, ports 1 and 2 | `--backend rgbmatrix --led-no-hardware-pulse --two-panel` |
+| `./scoreboard 2v` | Two-panel rotated clockwise | `--backend rgbmatrix --led-no-hardware-pulse --two-panel --vertical-screen` |
+| `./scoreboard 2v-ccw` | Two-panel rotated counter-clockwise | `--backend rgbmatrix --led-no-hardware-pulse --two-panel --screen-orientation vertical-ccw` |
+
+Any additional `main.py` flag can be added after the preset, for example:
+
+```bash
+./scoreboard 2v --port 80 --brightness 60
+./scoreboard 3 --test-pattern panel --init-only
+```
+
+If you want to run it as a global `scoreboard` command, create a symlink after cloning/installing the repo:
+
+```bash
+sudo ln -sf "$PWD/scoreboard" /usr/local/bin/scoreboard
+scoreboard 2v
+```
+
+Run `./scoreboard --help` to see launcher presets and launcher-only options. Run `python main.py --help` to see every application flag.
+
 ## Install on Raspberry Pi 5 (Blinka Piomatter)
 
 ```bash
 ./install-pi5.sh
 ```
 
-Run as a script:
+Run manually with the launcher:
 
 ```bash
-sudo -E env PATH="$PWD/.venv/bin:$PATH" python main.py --backend piomatter
+./scoreboard --backend piomatter
 ```
 
 ## Install on Raspberry Pi 4 (rpi-rgb-led-matrix)
@@ -29,19 +60,13 @@ sudo -E env PATH="$PWD/.venv/bin:$PATH" python main.py --backend piomatter
 ./install-pi4.sh
 ```
 
-Run as a script:
+Run manually with the launcher:
 
 ```bash
-sudo -E env PATH="$PWD/.venv/bin:$PATH" python main.py --backend rgbmatrix
+./scoreboard
 ```
 
-If startup exits because the Pi sound module (`snd_bcm2835`) is loaded, either disable built-in Pi audio or add the `rpi-rgb-led-matrix` compatibility flag exposed by this app:
-
-```bash
-sudo -E env PATH="$PWD/.venv/bin:$PATH" python main.py --backend rgbmatrix --led-no-hardware-pulse
-```
-
-`--led-no-hardware-pulse` is also available as `--rgb-no-hardware-pulse`. It avoids the sound/PWM conflict, but may increase display flicker compared with disabling built-in audio.
+The launcher expands to the required `sudo -E env PATH="$PWD/.venv/bin:$PATH" python main.py --backend rgbmatrix --led-no-hardware-pulse` shape automatically. `--led-no-hardware-pulse` is also available as `--rgb-no-hardware-pulse`. It avoids the sound/PWM conflict, but may increase display flicker compared with disabling built-in audio.
 
 By default, the Pi 4 backend is tuned for this project's three-panel P5 1/8-scan setup: one 64x32 panel per Triple Bonnet port using the Triple Bonnet/Active-3-compatible `regular` GPIO mapping. The app renders a logical 192x32 scoreboard, then remaps each 64x32 third of that image onto the three `rpi-rgb-led-matrix` parallel outputs. The effective default `rgbmatrix` topology is:
 
@@ -96,6 +121,30 @@ python main.py --two-panel --vertical-screen
 ```
 
 That renders two logical 32x64 panels and rotates them onto the physical 64x32 hardware. The team name, score, and batting-order tracker stay on the same two Triple Bonnet ports; balls/strikes/outs are stacked near the top of one panel while the inning number is shown near the top of the other panel. Top-of-inning puts balls/strikes/outs on panel 1 and the inning on panel 2; bottom-of-inning swaps them. Use `--two-panel --screen-orientation vertical-ccw` if your two rotated panels are mounted in the opposite direction.
+
+## Common application flags
+
+The launcher accepts the layout preset first, then forwards extra arguments to `main.py`. These are the most useful forwarded flags:
+
+| Flag | Purpose | Default / notes |
+| --- | --- | --- |
+| `--led-no-hardware-pulse` / `--rgb-no-hardware-pulse` | Disable `rpi-rgb-led-matrix` hardware pulsing to avoid conflicts with `snd_bcm2835` or other PWM users. | Always added by `./scoreboard`; manually add it if running `python main.py` directly on Pi 4. |
+| `--backend auto|piomatter|rgbmatrix` | Select the LED matrix driver. | Launcher default is `rgbmatrix`; app default is `auto`. Use `--backend piomatter` for Pi 5. |
+| `--two-panel` | Use only Triple Bonnet ports 1 and 2. | Implied by launcher presets `2`, `2v`, and `2v-ccw`. |
+| `--vertical-screen` | Shortcut for `--screen-orientation vertical-cw`; renders each physical 64x32 panel as a logical 32x64 rotated screen. | Implied by `3v` and `2v`. |
+| `--screen-orientation horizontal|vertical-cw|vertical-ccw` | Choose normal horizontal rendering or the direction used to rotate vertical panel layouts onto the physical hardware. | `horizontal`; use `vertical-ccw` when the rotated panels are mounted the opposite way from `--vertical-screen`. |
+| `--brightness 0-100` | Initial display brightness. | `70`; can also be adjusted in the web UI. |
+| `--port PORT` / `--listen ADDRESS` | Web UI bind port and address. | `8080` and `0.0.0.0`. |
+| `--state-file PATH` | JSON file for persisted scoreboard state. | `scoreboard_state.json` or `SCOREBOARD_STATE_FILE`. |
+| `--test-pattern panel` | Draw a startup panel/color diagnostic pattern instead of scoreboard data. | Combine with `--init-only` for quick wiring checks. |
+| `--init-only` | Initialize the LED driver, draw one frame, then exit. | Useful for diagnostics. |
+| `--panel-width`, `--panel-height`, `--chain-across`, `--chain-down` | Override logical panel geometry. | Defaults are 64x32 panels in a 3x1 chain; `--two-panel` defaults `--chain-across` to 2 unless explicitly set. |
+| `--panel-scan auto|1/8|1/16|1/32` / `--addr-lines N` | Tune HUB75 address-line handling for different panel scan ratios. | Repo default is `1/8`; override for other panel types. |
+| `--rgb-layout parallel-ports|daisy-chain` | Pi 4 topology for `rpi-rgb-led-matrix`. | `parallel-ports` drives one logical panel per Triple Bonnet port. |
+| `--rgb-mirror-chain-length N` | Mirror each logical panel onto additional daisy-chained physical panels on the same output. | `1`; set `2` when each output has one extra mirrored panel. |
+| `--rgb-chain-length N` / `--rgb-parallel N` | Manually override low-level Pi 4 chain and parallel counts. | Usually automatic from layout/geometry. |
+| `--rgb-gpio-mapping NAME`, `--rgb-slowdown-gpio N`, `--rgb-multiplexing N`, `--rgb-row-addr-type N`, `--rgb-pixel-mapper STRING` | Advanced `rpi-rgb-led-matrix` tuning. | Defaults are tuned for this project's Triple Bonnet P5 1/8-scan setup. |
+| `--pinout auto|active3|active3bgr|matrixbonnet` / `--serpentine` | Piomatter fallback diagnostics and panel wiring options. | Normally leave at defaults. |
 
 ## Scoreboard features
 

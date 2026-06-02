@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SCRIPT_SOURCE" ]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" >/dev/null 2>&1 && pwd)"
+  SCRIPT_SOURCE="$(readlink "$SCRIPT_SOURCE")"
+  [[ "$SCRIPT_SOURCE" != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
+done
+REPO_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" >/dev/null 2>&1 && pwd)"
+if [[ -n "${VENV_DIR:-}" ]]; then
+  VENV_EXPLICIT=1
+else
+  VENV_EXPLICIT=0
+  VENV_DIR="$REPO_DIR/.venv"
+fi
+PYTHON_BIN="${PYTHON_BIN:-python}"
+BACKEND="${SCOREBOARD_BACKEND:-rgbmatrix}"
+PRINT_COMMAND=0
+USE_SUDO=1
+PRESET="three-panel"
+EXTRA_ARGS=()
+PRESET_ARGS=()
+
+usage() {
+  cat <<USAGE
+Usage: $(basename "$0") [preset] [options passed to main.py]
+
+Short launcher for the 3-panel baseball scoreboard. The launcher always adds:
+  --backend <backend> --led-no-hardware-pulse
+
+Presets:
+  3, basic, three, three-panel       Three horizontal panels (default)
+  3v, three-vertical, rotated-3      Three rotated vertical panels (clockwise)
+  3v-ccw, rotated-3-ccw             Three rotated vertical panels (counter-clockwise)
+  2, two, two-panel                  Two horizontal panels on ports 1 and 2
+  2v, two-vertical, rotated-2        Two rotated vertical panels (clockwise)
+  2v-ccw, rotated-2-ccw             Two rotated vertical panels (counter-clockwise)
+
+Launcher options:
+  --backend BACKEND                  Driver backend: rgbmatrix (default), piomatter, or auto
+  --repo-dir DIR                     Repository directory (default: launcher location)
+  --venv DIR                         Virtual environment directory (default: REPO_DIR/.venv)
+  --python BIN                       Python executable name/path inside the sudo environment
+  --no-sudo                          Run directly instead of through sudo -E
+  --print-command                    Print the command instead of running it
+  -h, --help                         Show this help
+  --                                 Stop launcher parsing; pass remaining args to main.py
+
+Examples:
+  $(basename "$0")                  # three-panel horizontal Pi 4/rgbmatrix
+  $(basename "$0") 3v               # three-panel rotated clockwise
+  $(basename "$0") 2                # two-panel horizontal
+  $(basename "$0") 2v               # two-panel rotated clockwise
+  $(basename "$0") 2v-ccw --port 80 # two-panel rotated counter-clockwise, web UI on port 80
+USAGE
+}
+
+quote_command() {
+  printf '%q ' "$@"
+  printf '\n'
+}
+
+while (($#)); do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --print-command)
+      PRINT_COMMAND=1
+      shift
+      ;;
+    --no-sudo)
+      USE_SUDO=0
+      shift
+      ;;
+    --backend)
+      if (($# < 2)); then
+        echo "error: --backend requires a value" >&2
+        exit 2
+      fi
+      BACKEND="$2"
+      shift 2
+      ;;
+    --backend=*)
+      BACKEND="${1#--backend=}"
+      shift
+      ;;
+    --repo-dir)
+      if (($# < 2)); then
+        echo "error: --repo-dir requires a value" >&2
+        exit 2
+      fi
+      REPO_DIR="$2"
+      if ((VENV_EXPLICIT == 0)); then
+        VENV_DIR="$REPO_DIR/.venv"
+      fi
+      shift 2
+      ;;
+    --repo-dir=*)
+      REPO_DIR="${1#--repo-dir=}"
+      if ((VENV_EXPLICIT == 0)); then
+        VENV_DIR="$REPO_DIR/.venv"
+      fi
+      shift
+      ;;
+    --venv)
+      if (($# < 2)); then
+        echo "error: --venv requires a value" >&2
+        exit 2
+      fi
+      VENV_DIR="$2"
+      VENV_EXPLICIT=1
+      shift 2
+      ;;
+    --venv=*)
+      VENV_DIR="${1#--venv=}"
+      VENV_EXPLICIT=1
+      shift
+      ;;
+    --python)
+      if (($# < 2)); then
+        echo "error: --python requires a value" >&2
+        exit 2
+      fi
+      PYTHON_BIN="$2"
+      shift 2
+      ;;
+    --python=*)
+      PYTHON_BIN="${1#--python=}"
+      shift
+      ;;
+    --)
+      shift
+      EXTRA_ARGS+=("$@")
+      break
+      ;;
+    3|basic|three|three-panel)
+      PRESET="three-panel"
+      shift
+      ;;
+    3v|three-vertical|rotated-3)
+      PRESET="three-panel-vertical"
+      shift
+      ;;
+    3v-ccw|three-vertical-ccw|rotated-3-ccw)
+      PRESET="three-panel-vertical-ccw"
+      shift
+      ;;
+    2|two|two-panel)
+      PRESET="two-panel"
+      shift
+      ;;
+    2v|two-vertical|rotated-2)
+      PRESET="two-panel-vertical"
+      shift
+      ;;
+    2v-ccw|two-vertical-ccw|rotated-2-ccw)
+      PRESET="two-panel-vertical-ccw"
+      shift
+      ;;
+    *)
+      EXTRA_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+case "$PRESET" in
+  three-panel)
+    PRESET_ARGS=()
+    ;;
+  three-panel-vertical)
+    PRESET_ARGS=(--vertical-screen)
+    ;;
+  three-panel-vertical-ccw)
+    PRESET_ARGS=(--screen-orientation vertical-ccw)
+    ;;
+  two-panel)
+    PRESET_ARGS=(--two-panel)
+    ;;
+  two-panel-vertical)
+    PRESET_ARGS=(--two-panel --vertical-screen)
+    ;;
+  two-panel-vertical-ccw)
+    PRESET_ARGS=(--two-panel --screen-orientation vertical-ccw)
+    ;;
+esac
+
+RUN_ENV=(env "PATH=$VENV_DIR/bin:$PATH")
+APP_CMD=("$PYTHON_BIN" "$REPO_DIR/main.py" --backend "$BACKEND" --led-no-hardware-pulse "${PRESET_ARGS[@]}" "${EXTRA_ARGS[@]}")
+
+if ((USE_SUDO)); then
+  COMMAND=(sudo -E "${RUN_ENV[@]}" "${APP_CMD[@]}")
+else
+  COMMAND=("${RUN_ENV[@]}" "${APP_CMD[@]}")
+fi
+
+if ((PRINT_COMMAND)); then
+  quote_command "${COMMAND[@]}"
+  exit 0
+fi
+
+exec "${COMMAND[@]}"

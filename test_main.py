@@ -526,6 +526,18 @@ class MatrixRendererColorTests(unittest.TestCase):
         )
         self.assertEqual(draw_inning_number.call_args.args[1], (28, 18))
 
+    def test_two_panel_counts_do_not_overwrite_score_pixels(self):
+        renderer = self._renderer_with_colors(width=128, height=32, inning_half="top")
+        renderer.two_panel_layout = True
+        renderer.state.outs = 2
+        renderer.state.score_a = 0
+
+        renderer.draw_mode()
+
+        image, _ = renderer.display.images[-1]
+        score_color = main.hex_to_rgb(renderer.state.text_colors["team_a_score"])
+        self.assertEqual(image.getpixel((52, 27)), score_color)
+
     def test_two_panel_layout_keeps_team_panels_on_ports_one_and_two(self):
         renderer = self._renderer_with_colors(width=128, height=32, inning_half="top")
         renderer.two_panel_layout = True

@@ -1670,33 +1670,6 @@ class MatrixRenderer:
         red: tuple[int, int, int],
         dim: tuple[int, int, int],
     ) -> None:
-        self._draw_team_panel(
-            draw,
-            0,
-            panel_w,
-            self.state.team_a,
-            self.state.score_a,
-            "team_a_name",
-            "team_a_score",
-            self.state.current_batter_a,
-            self.state.batting_order_a,
-            colors,
-            dim,
-        )
-        self._draw_team_panel(
-            draw,
-            panel_w,
-            panel_w,
-            self.state.team_b,
-            self.state.score_b,
-            "team_b_name",
-            "team_b_score",
-            self.state.current_batter_b,
-            self.state.batting_order_b,
-            colors,
-            dim,
-        )
-
         count_panel_x, inning_panel_x = (0, panel_w)
         if self.state.inning_half == "bottom":
             count_panel_x, inning_panel_x = (panel_w, 0)
@@ -1745,6 +1718,37 @@ class MatrixRenderer:
             (inning_x, inning_y),
             inning_text,
             colors["inning_value"],
+        )
+
+        # Draw team content last in the two-panel horizontal layout. The count
+        # and inning widgets share a 64x32 panel with the team's score, so
+        # rendering the unchanged team panels last keeps score pixels intact
+        # when the widgets touch the bottom/right edge of the score glyphs.
+        self._draw_team_panel(
+            draw,
+            0,
+            panel_w,
+            self.state.team_a,
+            self.state.score_a,
+            "team_a_name",
+            "team_a_score",
+            self.state.current_batter_a,
+            self.state.batting_order_a,
+            colors,
+            dim,
+        )
+        self._draw_team_panel(
+            draw,
+            panel_w,
+            panel_w,
+            self.state.team_b,
+            self.state.score_b,
+            "team_b_name",
+            "team_b_score",
+            self.state.current_batter_b,
+            self.state.batting_order_b,
+            colors,
+            dim,
         )
 
     def _draw_two_panel_vertical_screen_layout(

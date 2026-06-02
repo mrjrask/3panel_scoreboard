@@ -39,12 +39,32 @@ python -m pip install --upgrade --force-reinstall --no-cache-dir "git+$PIOMATTER
 cat <<MSG
 
 Install complete for Raspberry Pi 5 / Blinka Piomatter.
-Run manually with the short launcher:
+
+Quick launch (recommended):
   "$REPO_DIR/scoreboard" --backend piomatter
 
-Optional global command symlink:
+The short launcher automatically uses the repo virtualenv and runs through sudo -E.
+You can pass any normal app option after the launcher command.
+
+Common launcher presets:
+  "$REPO_DIR/scoreboard" --backend piomatter              # 3 horizontal panels (default)
+  "$REPO_DIR/scoreboard" 3v --backend piomatter           # 3 rotated vertical panels, clockwise
+  "$REPO_DIR/scoreboard" 3v-ccw --backend piomatter       # 3 rotated vertical panels, counter-clockwise
+  "$REPO_DIR/scoreboard" 2 --backend piomatter            # 2 horizontal panels
+  "$REPO_DIR/scoreboard" 2v --backend piomatter           # 2 rotated vertical panels, clockwise
+  "$REPO_DIR/scoreboard" 2v-ccw --backend piomatter       # 2 rotated vertical panels, counter-clockwise
+
+Useful options:
+  "$REPO_DIR/scoreboard" --help                           # show all launcher presets/options
+  "$REPO_DIR/scoreboard" --backend piomatter --print-command  # preview expanded sudo/python command
+  "$REPO_DIR/scoreboard" --backend piomatter --no-sudo        # run without sudo, if your setup allows it
+  "$REPO_DIR/scoreboard" --backend piomatter -- --help        # show application options from main.py
+  "$REPO_DIR/scoreboard" 2v --backend piomatter --port 80     # example: preset plus app option
+
+Optional global command symlink for the quickest command:
   sudo ln -sf "$REPO_DIR/scoreboard" /usr/local/bin/scoreboard
   scoreboard --backend piomatter
+  scoreboard 2v --backend piomatter --port 80
 
 Install service:
   sudo cp "$REPO_DIR/systemd/scoreboard.service" /etc/systemd/system/scoreboard.service

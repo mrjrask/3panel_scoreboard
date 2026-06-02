@@ -108,6 +108,10 @@ scoreboard 2v
 
 Run `./scoreboard --help` to see launcher presets and launcher-only options. Run `python main.py --help` to see every application flag.
 
+There is intentionally no uninstaller script. To remove a local install, stop any systemd service you created, remove optional symlinks, and delete the cloned repository including its `.venv` directory.
+
+The Pi installer scripts are safe to re-run after updating this repository. Re-running the installer refreshes apt packages, reuses the existing `.venv`, upgrades Python packages from `requirements.txt`, and reinstalls the latest hardware driver from its configured git source.
+
 ## Install on Raspberry Pi 5 (Blinka Piomatter)
 
 ```bash

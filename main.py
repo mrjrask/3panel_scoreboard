@@ -8,6 +8,7 @@ import importlib.metadata
 import json
 import logging
 import os
+import sys
 import tempfile
 import threading
 from dataclasses import asdict, dataclass, field
@@ -1178,9 +1179,15 @@ class RotatedPanelDisplay:
 
 
 class MatrixRenderer:
-    def __init__(self, display: MatrixDisplay, state: ScoreboardState):
+    def __init__(
+        self,
+        display: MatrixDisplay,
+        state: ScoreboardState,
+        two_panel_layout: bool = False,
+    ):
         self.display = display
         self.state = state
+        self.two_panel_layout = two_panel_layout
         self.lock = threading.Lock()
         self.font = load_scoreboard_font()
         self.score_font = load_score_font()
@@ -1280,8 +1287,15 @@ class MatrixRenderer:
                     (2, y + 28), f"OUT {self.state.outs}", fill=red, font=self.font
                 )
             else:
-                panel_w = self.display.width // 3
+                panel_count = 2 if self.two_panel_layout else 3
+                panel_w = self.display.width // panel_count
                 half = "TOP" if self.state.inning_half == "top" else "BOT"
+                if self.two_panel_layout:
+                    self._draw_two_panel_horizontal_layout(
+                        draw, panel_w, colors, red, dim
+                    )
+                    self.display.show(image, self.state.brightness)
+                    return
                 if panel_w <= 32 and self.display.height >= 64:
                     self._draw_narrow_vertical_screen_layout(
                         draw, panel_w, half, colors, red, dim
@@ -1643,6 +1657,91 @@ class MatrixRenderer:
             dim,
         )
 
+    def _draw_two_panel_horizontal_layout(
+        self,
+        draw: ImageDraw.ImageDraw,
+        panel_w: int,
+        colors: dict[str, tuple[int, int, int]],
+        red: tuple[int, int, int],
+        dim: tuple[int, int, int],
+    ) -> None:
+        self._draw_team_panel(
+            draw,
+            0,
+            panel_w,
+            self.state.team_a,
+            self.state.score_a,
+            "team_a_name",
+            "team_a_score",
+            self.state.current_batter_a,
+            self.state.batting_order_a,
+            colors,
+            dim,
+        )
+        self._draw_team_panel(
+            draw,
+            panel_w,
+            panel_w,
+            self.state.team_b,
+            self.state.score_b,
+            "team_b_name",
+            "team_b_score",
+            self.state.current_batter_b,
+            self.state.batting_order_b,
+            colors,
+            dim,
+        )
+
+        count_panel_x, inning_panel_x = (0, panel_w)
+        if self.state.inning_half == "bottom":
+            count_panel_x, inning_panel_x = (panel_w, 0)
+
+        indicator_y = self._batting_order_y(0, self.display.height) - 3
+        self._draw_count_dots(
+            draw,
+            count_panel_x + 2,
+            indicator_y,
+            "B",
+            self.state.balls,
+            3,
+            colors["count_labels"],
+            red,
+            dim,
+        )
+        self._draw_count_dots(
+            draw,
+            count_panel_x + 25,
+            indicator_y,
+            "S",
+            self.state.strikes,
+            2,
+            colors["count_labels"],
+            red,
+            dim,
+        )
+        self._draw_count_dots(
+            draw,
+            count_panel_x + 44,
+            indicator_y,
+            "O",
+            self.state.outs,
+            2,
+            colors["count_labels"],
+            red,
+            dim,
+        )
+
+        inning_text = str(self.state.inning)
+        inning_width, inning_height = self._inning_number_size(inning_text)
+        inning_x = inning_panel_x + max(2, (panel_w - inning_width) // 2)
+        inning_y = max(0, indicator_y - inning_height + 1)
+        self._draw_inning_number(
+            draw,
+            (inning_x, inning_y),
+            inning_text,
+            colors["inning_value"],
+        )
+
     def _draw_vertical_screen_team_panel(
         self,
         draw: ImageDraw.ImageDraw,
@@ -1762,9 +1861,10 @@ class MatrixRenderer:
             draw.rectangle((dot_x, y - 1, dot_x + 2, y + 1), fill=fill)
 
     def _draw_panel_test(self, draw: ImageDraw.ImageDraw) -> None:
-        panel_w = max(1, self.display.width // 3)
-        colors = ((255, 0, 0), (0, 220, 0), (0, 90, 255))
-        labels = ("P1", "P2", "P3")
+        panel_count = 2 if self.two_panel_layout else 3
+        panel_w = max(1, self.display.width // panel_count)
+        colors = ((255, 0, 0), (0, 220, 0), (0, 90, 255))[:panel_count]
+        labels = ("P1", "P2", "P3")[:panel_count]
         for idx, (color, label) in enumerate(zip(colors, labels)):
             x0 = idx * panel_w
             x1 = min(self.display.width - 1, x0 + panel_w - 1)
@@ -2164,6 +2264,14 @@ def parse_args() -> argparse.Namespace:
     # Triple Bonnet default: 3 panels side-by-side (192x32 total).
     p.add_argument("--chain-across", type=int, default=3)
     p.add_argument("--chain-down", type=int, default=1)
+    p.add_argument(
+        "--two-panel",
+        action="store_true",
+        help=(
+            "Use the two-panel scoreboard layout for panels on Triple Bonnet ports "
+            "1 and 2; defaults --chain-across to 2 so no third info panel is used."
+        ),
+    )
     p.add_argument("--bit-depth", type=int, default=6)
     p.add_argument("--brightness", type=int, default=70)
     p.add_argument(
@@ -2283,6 +2391,17 @@ def main() -> None:
     set_state_file(args.state_file)
     state = load_state()
     state.brightness = args.brightness
+    chain_across_was_set = any(
+        arg == "--chain-across" or arg.startswith("--chain-across=")
+        for arg in sys.argv[1:]
+    )
+    if (
+        args.two_panel
+        and not chain_across_was_set
+        and args.chain_across == 3
+        and args.chain_down == 1
+    ):
+        args.chain_across = 2
     physical_width = args.panel_width * args.chain_across
     physical_height = args.panel_height * args.chain_down
     render_width = physical_width
@@ -2297,6 +2416,8 @@ def main() -> None:
         )
     elif args.chain_across == 1 and args.chain_down == 3:
         print("[scoreboard] Using vertical geometry (64x96).")
+    elif args.two_panel and args.chain_across == 2 and args.chain_down == 1:
+        print("[scoreboard] Using two-panel horizontal geometry (128x32).")
     elif args.chain_across == 3 and args.chain_down == 1:
         print("[scoreboard] Using horizontal geometry (192x32).")
     inferred_addr_lines = infer_addr_lines(
@@ -2305,7 +2426,8 @@ def main() -> None:
     print(
         f"[scoreboard] geometry={physical_width}x{physical_height} render={render_width}x{render_height} "
         f"panel={args.panel_width}x{args.panel_height} orientation={args.screen_orientation} "
-        f"backend={args.backend} scan={args.panel_scan} addr_lines={inferred_addr_lines} "
+        f"backend={args.backend} layout={'two-panel' if args.two_panel else 'three-panel'} "
+        f"scan={args.panel_scan} addr_lines={inferred_addr_lines} "
         f"serpentine={args.serpentine} pinout={args.pinout} "
         f"rgb_layout={args.rgb_layout} rgb_multiplexing={args.rgb_multiplexing} "
         f"rgb_mirror_chain_length={args.rgb_mirror_chain_length} "
@@ -2344,10 +2466,13 @@ def main() -> None:
             args.chain_down,
             args.screen_orientation,
         )
-    renderer = MatrixRenderer(display, state)
+    renderer = MatrixRenderer(display, state, two_panel_layout=args.two_panel)
     if args.test_pattern == "panel":
         renderer.draw_mode("panel_test")
-        LOGGER.info("Rendered panel test pattern (P1/P2/P3, R/G/B)")
+        LOGGER.info(
+            "Rendered panel test pattern (%s)",
+            "P1/P2, R/G" if args.two_panel else "P1/P2/P3, R/G/B",
+        )
     else:
         renderer.draw()
     LOGGER.info("Initial frame rendered using backend=%s", display.backend_name)

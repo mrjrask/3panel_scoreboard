@@ -74,6 +74,20 @@ If your physical panel arrangement still needs coordinate remapping, pass the li
 python main.py --backend rgbmatrix --rgb-pixel-mapper 'U-mapper;Rotate:90'
 ```
 
+## Two-panel option
+
+Use `--two-panel` when only the panels plugged into Triple Bonnet ports 1 and 2 should be used:
+
+```bash
+python main.py --two-panel
+```
+
+The flag defaults the horizontal geometry to two 64x32 panels (`--chain-across 2 --chain-down 1`) unless you explicitly provide another geometry. The away and home team panels keep their usual team name, batting-order tracker, and score placement on ports 1 and 2. The inning, balls, strikes, and outs indicators move to the row three pixels above the batting-order tracker:
+
+- **Top of inning:** balls/strikes/outs appear on panel 1, and the inning number appears on panel 2.
+- **Bottom of inning:** the inning number appears on panel 1, and balls/strikes/outs appear on panel 2.
+
+For Pi 4 / `rpi-rgb-led-matrix`, this also defaults to the equivalent of `--rgb-parallel 2 --rgb-chain-length 1` so the app drives the first two Triple Bonnet ports and does not allocate a third info panel.
 
 ## Scoreboard features
 

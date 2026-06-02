@@ -161,8 +161,11 @@ while (($#)); do
       shift
       ;;
     *)
-      EXTRA_ARGS+=("$1")
-      shift
+      # The first non-launcher argument starts the main.py argument list. Stop
+      # parsing launcher presets here so option values like `--brightness 3` or
+      # `--chain-across 2` are preserved instead of being mistaken for presets.
+      EXTRA_ARGS+=("$@")
+      break
       ;;
   esac
 done

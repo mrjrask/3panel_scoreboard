@@ -702,6 +702,18 @@ class ScoreboardLauncherTests(unittest.TestCase):
         self.assertIn("--screen-orientation vertical-ccw", command)
         self.assertIn("--port 8081", command)
 
+    def test_launcher_preserves_forwarded_option_value_matching_default_preset(self):
+        command = self._launcher_command("--brightness", "3")
+
+        self.assertIn("--brightness 3", command)
+        self.assertNotIn("--two-panel", command)
+
+    def test_launcher_preserves_forwarded_option_value_matching_two_panel_preset(self):
+        command = self._launcher_command("--chain-across", "2")
+
+        self.assertIn("--chain-across 2", command)
+        self.assertNotIn("--two-panel", command)
+
 
 if __name__ == "__main__":
     unittest.main()

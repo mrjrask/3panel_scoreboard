@@ -15,6 +15,72 @@ Two Raspberry Pi installers are provided:
 
 Use the included `scoreboard` launcher instead of typing the full `sudo -E env PATH=... python main.py ...` command. The launcher always includes `--led-no-hardware-pulse` (also known as `--rgb-no-hardware-pulse`) so Pi 4 / `rpi-rgb-led-matrix` launches consistently avoid the Pi audio/PWM hardware-pulse conflict.
 
+### Launch quick reference
+
+Run every command below from the repository directory unless you have installed the optional global `scoreboard` symlink.
+
+1. **Install dependencies for your Pi model before the first launch.**
+   ```bash
+   ./install-pi5.sh   # Raspberry Pi 5 / Blinka Piomatter
+   ./install-pi4.sh   # Raspberry Pi 4 / rpi-rgb-led-matrix
+   ```
+2. **Launch the default Pi 4 / RGB Matrix setup.**
+   ```bash
+   ./scoreboard
+   ```
+   This is the default three-panel horizontal layout and expands to `--backend rgbmatrix --led-no-hardware-pulse`.
+3. **Launch the Pi 5 / Piomatter setup.**
+   ```bash
+   ./scoreboard --backend piomatter
+   ```
+4. **Launch a specific layout preset.**
+   ```bash
+   ./scoreboard 3        # three-panel horizontal default
+   ./scoreboard 3v       # three-panel vertical, rotated clockwise
+   ./scoreboard 3v-ccw   # three-panel vertical, rotated counter-clockwise
+   ./scoreboard 2        # two-panel horizontal, ports 1 and 2
+   ./scoreboard 2v       # two-panel vertical, rotated clockwise
+   ./scoreboard 2v-ccw   # two-panel vertical, rotated counter-clockwise
+   ```
+5. **Pass application flags after the preset.**
+   ```bash
+   ./scoreboard 2v --port 80 --brightness 60
+   ./scoreboard 3 --test-pattern panel --init-only
+   ```
+6. **Run the Python entry point directly when you do not want the launcher wrapper.**
+   ```bash
+   python main.py
+   python main.py --backend rgbmatrix --led-no-hardware-pulse
+   python main.py --backend piomatter
+   ```
+   Direct Python launches default to `--backend auto`, `--listen 0.0.0.0`, `--port 8080`, `--panel-width 64`, `--panel-height 32`, `--chain-across 3`, and `--chain-down 1`. Add Pi/backend/layout flags explicitly when bypassing `./scoreboard`.
+7. **Install and use an optional global command.**
+   ```bash
+   sudo ln -sf "$PWD/scoreboard" /usr/local/bin/scoreboard
+   scoreboard
+   scoreboard 2v
+   ```
+8. **Open the web UI after any successful launch.**
+   ```text
+   http://<pi-ip>:8080/
+   ```
+   If you launch with `--port 80`, open `http://<pi-ip>/` instead.
+9. **Install and run as a boot-time systemd service.**
+   ```bash
+   sudo cp systemd/scoreboard.service /etc/systemd/system/scoreboard.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now scoreboard.service
+   ```
+   The included unit expects the repo at `/opt/scoreboard_3panel_pi5`; copy the repo there or edit `systemd/scoreboard.service` before installing it.
+10. **Use built-in help and diagnostics.**
+    ```bash
+    ./scoreboard --help
+    python main.py --help
+    python main.py --panel-scan 1/8 --init-only
+    python main.py --panel-scan 1/8 --test-pattern panel
+    ```
+    The first two commands list launcher and application options. The last two commands are quick hardware checks: initialize/draw/exit, then draw the panel/color diagnostic pattern.
+
 From the repository directory, the common manual launch commands are:
 
 | Command | Layout | Expands to the important app flags |

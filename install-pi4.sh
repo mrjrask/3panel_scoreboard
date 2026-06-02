@@ -24,8 +24,12 @@ sudo apt install -y \
   python3-pip \
   python3-venv
 
-echo "Creating virtual environment at: $VENV_DIR"
-python3 -m venv "$VENV_DIR"
+echo "Creating or updating virtual environment at: $VENV_DIR"
+if [[ -f "$VENV_DIR/pyvenv.cfg" ]]; then
+  python3 -m venv --upgrade "$VENV_DIR"
+else
+  python3 -m venv "$VENV_DIR"
+fi
 source "$VENV_DIR/bin/activate"
 
 echo "Ensuring bundled fonts are readable by the runtime service..."
@@ -36,9 +40,14 @@ find "$REPO_DIR" -type d -exec chmod a+rx {} +
 find "$REPO_DIR/fonts" -type f -name '*.bdf' -exec chmod a+r {} +
 chmod a+rx "$REPO_DIR/scoreboard"
 
+echo "Updating Python packaging tools..."
 python -m pip install --upgrade pip wheel setuptools
-python -m pip install -r "$REPO_DIR/requirements.txt"
-python -m pip install "git+$RGB_MATRIX_REPO"
+
+echo "Installing or updating Python dependencies from requirements.txt..."
+python -m pip install --upgrade -r "$REPO_DIR/requirements.txt"
+
+echo "Installing or updating hardware driver from latest git source..."
+python -m pip install --upgrade --force-reinstall --no-cache-dir "git+$RGB_MATRIX_REPO"
 
 cat <<MSG
 

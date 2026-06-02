@@ -1291,9 +1291,14 @@ class MatrixRenderer:
                 panel_w = self.display.width // panel_count
                 half = "TOP" if self.state.inning_half == "top" else "BOT"
                 if self.two_panel_layout:
-                    self._draw_two_panel_horizontal_layout(
-                        draw, panel_w, colors, red, dim
-                    )
+                    if panel_w <= 32 and self.display.height >= 64:
+                        self._draw_two_panel_vertical_screen_layout(
+                            draw, panel_w, colors, red, dim
+                        )
+                    else:
+                        self._draw_two_panel_horizontal_layout(
+                            draw, panel_w, colors, red, dim
+                        )
                     self.display.show(image, self.state.brightness)
                     return
                 if panel_w <= 32 and self.display.height >= 64:
@@ -1741,6 +1746,105 @@ class MatrixRenderer:
             inning_text,
             colors["inning_value"],
         )
+
+    def _draw_two_panel_vertical_screen_layout(
+        self,
+        draw: ImageDraw.ImageDraw,
+        panel_w: int,
+        colors: dict[str, tuple[int, int, int]],
+        red: tuple[int, int, int],
+        dim: tuple[int, int, int],
+    ) -> None:
+        self._draw_two_panel_vertical_team_panel(
+            draw,
+            0,
+            panel_w,
+            self.state.team_a,
+            self.state.score_a,
+            "team_a_name",
+            "team_a_score",
+            self.state.current_batter_a,
+            self.state.batting_order_a,
+            colors,
+            dim,
+        )
+        self._draw_two_panel_vertical_team_panel(
+            draw,
+            panel_w,
+            panel_w,
+            self.state.team_b,
+            self.state.score_b,
+            "team_b_name",
+            "team_b_score",
+            self.state.current_batter_b,
+            self.state.batting_order_b,
+            colors,
+            dim,
+        )
+
+        count_panel_x, inning_panel_x = (0, panel_w)
+        if self.state.inning_half == "bottom":
+            count_panel_x, inning_panel_x = (panel_w, 0)
+
+        for y, label, count, max_count in (
+            (15, "B", self.state.balls, 3),
+            (23, "S", self.state.strikes, 2),
+            (31, "O", self.state.outs, 2),
+        ):
+            self._draw_count_dots(
+                draw,
+                count_panel_x + 2,
+                y,
+                label,
+                count,
+                max_count,
+                colors["count_labels"],
+                red,
+                dim,
+            )
+
+        inning_text = str(self.state.inning)
+        inning_width, _ = self._inning_number_size(inning_text)
+        inning_x = inning_panel_x + max(2, (panel_w - inning_width) // 2)
+        self._draw_inning_number(
+            draw,
+            (inning_x, 14),
+            inning_text,
+            colors["inning_value"],
+        )
+
+    def _draw_two_panel_vertical_team_panel(
+        self,
+        draw: ImageDraw.ImageDraw,
+        x: int,
+        width: int,
+        team: str,
+        score: int,
+        name_key: str,
+        score_key: str,
+        current_batter: int,
+        lineup_size: int,
+        colors: dict[str, tuple[int, int, int]],
+        dim: tuple[int, int, int],
+    ) -> None:
+        self._draw_clipped_team_name(
+            draw, (x + 2, 0), team, width - 4, colors[name_key]
+        )
+        score_text = str(score)
+        score_width, _ = self._score_text_size(score_text)
+        score_x = x + max(2, (width - score_width) // 2)
+        score_y = max(0, self.display.height - 27)
+        self._draw_score_text(draw, (score_x, score_y), score_text, colors[score_key])
+        if self.state.batting_order_enabled:
+            self._draw_batting_order(
+                draw,
+                x + 2,
+                self._batting_order_y(0, self.display.height),
+                lineup_size,
+                current_batter,
+                colors[name_key],
+                dim,
+            )
 
     def _draw_vertical_screen_team_panel(
         self,

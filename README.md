@@ -89,6 +89,14 @@ The flag defaults the horizontal geometry to two 64x32 panels (`--chain-across 2
 
 For Pi 4 / `rpi-rgb-led-matrix`, this also defaults to the equivalent of `--rgb-parallel 2 --rgb-chain-length 1` so the app drives the first two Triple Bonnet ports and does not allocate a third info panel.
 
+The two-panel layout can also be used with rotated vertical screens:
+
+```bash
+python main.py --two-panel --vertical-screen
+```
+
+That renders two logical 32x64 panels and rotates them onto the physical 64x32 hardware. The team name, score, and batting-order tracker stay on the same two Triple Bonnet ports; balls/strikes/outs are stacked near the top of one panel while the inning number is shown near the top of the other panel. Top-of-inning puts balls/strikes/outs on panel 1 and the inning on panel 2; bottom-of-inning swaps them. Use `--two-panel --screen-orientation vertical-ccw` if your two rotated panels are mounted in the opposite direction.
+
 ## Scoreboard features
 
 This Raspberry Pi/Triple Bonnet adaptation carries forward the manual baseball scoreboard controls from `mrjrask/scoreboard_i75w`:

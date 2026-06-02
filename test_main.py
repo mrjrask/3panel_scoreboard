@@ -536,6 +536,54 @@ class MatrixRendererColorTests(unittest.TestCase):
         panel_origins = [call.args[1] for call in draw_team_panel.call_args_list]
         self.assertEqual(panel_origins, [0, 64])
 
+    def test_two_panel_vertical_top_places_stacked_counts_and_inning(self):
+        renderer = self._renderer_with_colors(width=64, height=64, inning_half="top")
+        renderer.two_panel_layout = True
+
+        with (
+            mock.patch.object(renderer, "_draw_count_dots") as draw_count_dots,
+            mock.patch.object(renderer, "_draw_inning_number") as draw_inning_number,
+        ):
+            renderer.draw_mode()
+
+        count_positions = [
+            (call.args[1], call.args[2], call.args[3])
+            for call in draw_count_dots.call_args_list
+        ]
+        self.assertEqual(count_positions, [(2, 15, "B"), (2, 23, "S"), (2, 31, "O")])
+        self.assertEqual(draw_inning_number.call_args.args[1], (44, 14))
+
+    def test_two_panel_vertical_bottom_swaps_stacked_counts_and_inning(self):
+        renderer = self._renderer_with_colors(width=64, height=64, inning_half="bottom")
+        renderer.two_panel_layout = True
+
+        with (
+            mock.patch.object(renderer, "_draw_count_dots") as draw_count_dots,
+            mock.patch.object(renderer, "_draw_inning_number") as draw_inning_number,
+        ):
+            renderer.draw_mode()
+
+        count_positions = [
+            (call.args[1], call.args[2], call.args[3])
+            for call in draw_count_dots.call_args_list
+        ]
+        self.assertEqual(
+            count_positions, [(34, 15, "B"), (34, 23, "S"), (34, 31, "O")]
+        )
+        self.assertEqual(draw_inning_number.call_args.args[1], (12, 14))
+
+    def test_two_panel_vertical_keeps_team_panels_on_rotated_ports_one_and_two(self):
+        renderer = self._renderer_with_colors(width=64, height=64, inning_half="top")
+        renderer.two_panel_layout = True
+
+        with mock.patch.object(
+            renderer, "_draw_two_panel_vertical_team_panel"
+        ) as draw_team_panel:
+            renderer.draw_mode()
+
+        panel_origins = [call.args[1] for call in draw_team_panel.call_args_list]
+        self.assertEqual(panel_origins, [0, 32])
+
 
 class ScoreboardStateLimitTests(unittest.TestCase):
     def test_inning_clamps_to_twenty(self):

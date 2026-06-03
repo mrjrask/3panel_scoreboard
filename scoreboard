@@ -205,4 +205,69 @@ if ((PRINT_COMMAND)); then
   exit 0
 fi
 
-exec "${COMMAND[@]}"
+CHILD_PID=""
+STOPPING=0
+
+stop_child() {
+  local signal="${1:-TERM}"
+  local child="$CHILD_PID"
+
+  if [[ -z "$child" ]] || ! kill -0 "$child" 2>/dev/null; then
+    return
+  fi
+
+  if ((STOPPING == 0)); then
+    STOPPING=1
+    echo "scoreboard launcher: received $signal; stopping child process $child..." >&2
+  fi
+
+  # sudo can leave the Python process running as a child for a short window. Walk
+  # the direct-descendant tree before signaling the parent so Ctrl+C reliably
+  # tears down the whole launched app even when native LED-matrix initialization
+  # is stuck.
+  local descendants=()
+  if command -v pgrep >/dev/null 2>&1; then
+    local queue=("$child")
+    local parent
+    local kids
+    while ((${#queue[@]})); do
+      parent="${queue[0]}"
+      queue=("${queue[@]:1}")
+      kids=()
+      while IFS= read -r kid; do
+        [[ -n "$kid" ]] && kids+=("$kid")
+      done < <(pgrep -P "$parent" 2>/dev/null || true)
+      if ((${#kids[@]})); then
+        descendants+=("${kids[@]}")
+        queue+=("${kids[@]}")
+      fi
+    done
+  fi
+
+  if ((${#descendants[@]})); then
+    kill -"$signal" "${descendants[@]}" 2>/dev/null || true
+  fi
+  kill -"$signal" "$child" 2>/dev/null || true
+}
+
+force_stop_child() {
+  stop_child "TERM"
+  sleep 2
+  if [[ -n "$CHILD_PID" ]] && kill -0 "$CHILD_PID" 2>/dev/null; then
+    echo "scoreboard launcher: child did not exit after TERM; sending KILL..." >&2
+    stop_child "KILL"
+  fi
+}
+
+trap 'stop_child INT; exit 130' INT
+trap 'force_stop_child; exit 143' TERM
+trap 'if ((STOPPING)); then force_stop_child; fi' EXIT
+
+"${COMMAND[@]}" &
+CHILD_PID=$!
+set +e
+wait "$CHILD_PID"
+status=$?
+set -e
+CHILD_PID=""
+exit "$status"

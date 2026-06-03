@@ -108,6 +108,8 @@ scoreboard 2v
 
 Run `./scoreboard --help` to see launcher presets and launcher-only options. Run `python main.py --help` to see every application flag.
 
+If a Pi 4 launch hangs during LED-matrix startup before the web UI is available, press `Ctrl+C` once from the terminal that started `./scoreboard`. The launcher now traps interrupts and forwards them to the sudo/Python child process tree, then escalates to termination if needed so a stuck native driver initialization does not leave the app running in the background.
+
 There is intentionally no uninstaller script. To remove a local install, stop any systemd service you created, remove optional symlinks, and delete the cloned repository including its `.venv` directory.
 
 The Pi installer scripts are safe to re-run after updating this repository. Re-running the installer refreshes apt packages, reuses the existing `.venv`, upgrades Python packages from `requirements.txt`, and reinstalls the latest hardware driver from its configured git source.

@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/scoreboard_3panel_pi5
-ExecStart=/usr/bin/env bash -lc 'source /opt/scoreboard_3panel_pi5/.venv/bin/activate && exec python /opt/scoreboard_3panel_pi5/main.py --state-file /opt/scoreboard_3panel_pi5/scoreboard_state.json'
+ExecStart=/opt/scoreboard_3panel_pi5/scoreboard --backend piomatter --no-sudo -- --state-file /opt/scoreboard_3panel_pi5/scoreboard_state.json
 Restart=always
 RestartSec=2
 User=root

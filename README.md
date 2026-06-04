@@ -268,11 +268,14 @@ The included systemd unit passes an explicit `/opt/scoreboard_3panel_pi5/scorebo
 
 ### Font file permission warnings
 
-If startup logs warnings such as `Unable to load matrix font ... Permission denied`, the app is running but Pillow cannot read the bundled BDF fonts, so the scoreboard falls back to Pillow's default font. Re-run the Pi installer to repair repository permissions, or run this from the repo directory on the Pi:
+If startup logs warnings such as `Unable to load matrix font ... Permission denied`, the app is running but Pillow cannot read the bundled BDF fonts, so the scoreboard falls back to Pillow's default font. The `scoreboard` launcher and Pi installer both repair the repository root, `fonts/` directory, launcher, and bundled `.bdf` file permissions automatically so the service user can traverse the repository and read the bitmap fonts.
+
+If you run `main.py` directly and bypass both the launcher and installer, run this from the repo directory on the Pi once to apply the same repair manually:
 
 ```bash
-find "$PWD" -type d -exec chmod a+rx {} +
-find "$PWD/fonts" -type f -name '*.bdf' -exec chmod a+r {} +
+chmod a+rx "$PWD" "$PWD/fonts"
+find "$PWD/fonts" -maxdepth 1 -type f -name '*.bdf' -exec chmod a+r {} +
+chmod a+rx "$PWD/scoreboard"
 ```
 
 Directories need the execute/traverse bit and the `.bdf` files need the read bit for whichever user starts `main.py` or the systemd service.

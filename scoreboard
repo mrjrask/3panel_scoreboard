@@ -61,6 +61,31 @@ quote_command() {
   printf '\n'
 }
 
+ensure_runtime_permissions() {
+  local permission_errors=0
+
+  # Keep the checked-out repository path traversable and the bundled bitmap
+  # fonts readable for whichever user ultimately runs main.py (for example,
+  # sudo/root, systemd, or a dedicated service account). Git does not preserve
+  # directory modes or non-executable read bits, so repair them at launch time.
+  if [[ -d "$REPO_DIR" ]]; then
+    chmod a+rx "$REPO_DIR" || permission_errors=1
+  fi
+
+  if [[ -d "$REPO_DIR/fonts" ]]; then
+    chmod a+rx "$REPO_DIR/fonts" || permission_errors=1
+    find "$REPO_DIR/fonts" -maxdepth 1 -type f -name '*.bdf' -exec chmod a+r {} + || permission_errors=1
+  fi
+
+  if [[ -e "$REPO_DIR/scoreboard" ]]; then
+    chmod a+rx "$REPO_DIR/scoreboard" || permission_errors=1
+  fi
+
+  if ((permission_errors)); then
+    echo "scoreboard launcher: warning: unable to repair one or more repository/font permissions under $REPO_DIR" >&2
+  fi
+}
+
 while (($#)); do
   case "$1" in
     -h|--help)
@@ -199,6 +224,8 @@ if ((USE_SUDO)); then
 else
   COMMAND=("${RUN_ENV[@]}" "${APP_CMD[@]}")
 fi
+
+ensure_runtime_permissions
 
 if ((PRINT_COMMAND)); then
   quote_command "${COMMAND[@]}"

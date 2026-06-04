@@ -1,5 +1,6 @@
 import errno
 import json
+import stat
 import subprocess
 import sys
 import tempfile
@@ -713,6 +714,42 @@ class ScoreboardLauncherTests(unittest.TestCase):
 
         self.assertIn("--chain-across 2", command)
         self.assertNotIn("--two-panel", command)
+
+    def test_launcher_repairs_font_read_permissions(self):
+        launcher = Path(__file__).with_name("scoreboard")
+
+        with tempfile.TemporaryDirectory() as repo_dir:
+            repo = Path(repo_dir)
+            fonts = repo / "fonts"
+            fonts.mkdir()
+            font_file = fonts / "6x10.bdf"
+            font_file.write_text("STARTFONT 2.1\nENDFONT\n")
+            repo_launcher = repo / "scoreboard"
+            repo_launcher.write_text("#!/usr/bin/env bash\n")
+
+            repo.chmod(0o700)
+            fonts.chmod(0o700)
+            font_file.chmod(0o600)
+            repo_launcher.chmod(0o600)
+
+            subprocess.run(
+                [
+                    str(launcher),
+                    "--print-command",
+                    "--repo-dir",
+                    str(repo),
+                    "--venv",
+                    str(repo / ".venv"),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertTrue(repo.stat().st_mode & stat.S_IXOTH)
+            self.assertTrue(fonts.stat().st_mode & stat.S_IXOTH)
+            self.assertTrue(font_file.stat().st_mode & stat.S_IROTH)
+            self.assertTrue(repo_launcher.stat().st_mode & stat.S_IXOTH)
 
 
 if __name__ == "__main__":

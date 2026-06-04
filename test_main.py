@@ -121,6 +121,23 @@ class SaveStateTests(unittest.TestCase):
         self.assertIn("Saved this and future changes", "\n".join(logs.output))
 
 
+class ScoreboardStateTests(unittest.TestCase):
+    def test_batting_order_clamps_to_supported_vertical_lineup_size(self):
+        state = main.ScoreboardState(
+            batting_order_a=16,
+            batting_order_b=99,
+            current_batter_a=15,
+            current_batter_b=98,
+        )
+
+        state.clamp()
+
+        self.assertEqual(state.batting_order_a, main.MAX_BATTING_ORDER)
+        self.assertEqual(state.batting_order_b, main.MAX_BATTING_ORDER)
+        self.assertEqual(state.current_batter_a, 0)
+        self.assertEqual(state.current_batter_b, 8)
+
+
 class MatrixFontLoadingTests(unittest.TestCase):
     def test_load_matrix_font_uses_bdf_parser_for_bdf_fonts(self):
         with mock.patch.object(
@@ -473,6 +490,38 @@ class MatrixRendererColorTests(unittest.TestCase):
         self.assertEqual(draw_score_text.call_args_list[1].args[1][1], 20)
         self.assertEqual(draw_batting_order.call_args_list[0].args[2], 63)
         self.assertEqual(draw_batting_order.call_args_list[1].args[2], 63)
+
+    def test_vertical_screen_batting_order_staggers_fifteen_batters_in_two_rows(self):
+        renderer = self._renderer_with_colors(width=96, height=64)
+        image = main.Image.new("RGB", (32, 64), (0, 0, 0))
+        draw = main.ImageDraw.Draw(image)
+        active_color = (255, 255, 255)
+        inactive_color = (48, 48, 48)
+
+        renderer._draw_batting_order(
+            draw, 2, 63, 15, 14, active_color, inactive_color, staggered=True
+        )
+
+        pixels = image.load()
+        expected_points = {(2 + batter * 2, 62 + (batter % 2)) for batter in range(15)}
+        lit_points = {
+            (x, y)
+            for x in range(image.width)
+            for y in range(image.height)
+            if pixels[x, y] != (0, 0, 0)
+        }
+        self.assertEqual(lit_points, expected_points)
+        self.assertEqual(max(x for x, _ in lit_points), 30)
+        self.assertEqual(pixels[30, 62], active_color)
+
+    def test_vertical_screen_team_panel_requests_staggered_batting_order(self):
+        renderer = self._renderer_with_colors(width=96, height=64)
+
+        with mock.patch.object(renderer, "_draw_batting_order") as draw_batting_order:
+            renderer.draw_mode()
+
+        self.assertTrue(draw_batting_order.call_args_list[0].kwargs["staggered"])
+        self.assertTrue(draw_batting_order.call_args_list[1].kwargs["staggered"])
 
     def test_vertical_screen_info_panel_places_inning_at_top_and_stacks_counts(self):
         renderer = self._renderer_with_colors(width=96, height=64)

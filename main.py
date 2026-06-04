@@ -35,6 +35,7 @@ TEAM_NAME_FONT_PIXEL_SIZE = 8
 
 MAX_TEAM_CHARS = 10
 MAX_INNINGS = 20
+MAX_BATTING_ORDER = 15
 DEFAULT_TEXT_COLORS = {
     "team_a_name": "#FFFFFF",
     "team_a_score": "#FFB400",
@@ -126,8 +127,12 @@ class ScoreboardState:
         self.brightness = min(max(5, int(self.brightness)), 100)
         self.locked = bool(self.locked)
         self.batting_order_enabled = bool(self.batting_order_enabled)
-        self.batting_order_a = min(max(1, int(self.batting_order_a)), 20)
-        self.batting_order_b = min(max(1, int(self.batting_order_b)), 20)
+        self.batting_order_a = min(
+            max(1, int(self.batting_order_a)), MAX_BATTING_ORDER
+        )
+        self.batting_order_b = min(
+            max(1, int(self.batting_order_b)), MAX_BATTING_ORDER
+        )
         self.current_batter_a = int(self.current_batter_a) % self.batting_order_a
         self.current_batter_b = int(self.current_batter_b) % self.batting_order_b
         sanitized_colors = dict(DEFAULT_TEXT_COLORS)
@@ -1848,6 +1853,7 @@ class MatrixRenderer:
                 current_batter,
                 colors[name_key],
                 dim,
+                staggered=True,
             )
 
     def _draw_vertical_screen_team_panel(
@@ -1881,6 +1887,7 @@ class MatrixRenderer:
                 current_batter,
                 colors[name_key],
                 dim,
+                staggered=True,
             )
 
     def _draw_clipped_team_name(
@@ -1945,10 +1952,17 @@ class MatrixRenderer:
         current_batter: int,
         active_color: tuple[int, int, int],
         inactive_color: tuple[int, int, int],
+        staggered: bool = False,
     ) -> None:
         for batter in range(lineup_size):
             fill = active_color if batter == current_batter else inactive_color
-            draw.point((x + batter * 3, y), fill=fill)
+            if staggered:
+                dot_x = x + batter * 2
+                dot_y = y - 1 + (batter % 2)
+            else:
+                dot_x = x + batter * 3
+                dot_y = y
+            draw.point((dot_x, dot_y), fill=fill)
 
     def _draw_count_dots(
         self,
@@ -2068,8 +2082,8 @@ label { display:block; margin:8px 0 6px; color:#c9d3e3; }
                  oninput="document.getElementById('brightness-value').textContent = this.value">
           <div class='inline'><input type='checkbox' name='batting_order_enabled' value='1' {% if s.batting_order_enabled %}checked{% endif %}><label style='margin:0;'>Show batting-order tracker</label></div>
           <div class='formgrid'>
-            <div><label>Away Lineup Size</label><input type='number' name='batting_order_a' value='{{s.batting_order_a}}' min='1' max='20'></div>
-            <div><label>Home Lineup Size</label><input type='number' name='batting_order_b' value='{{s.batting_order_b}}' min='1' max='20'></div>
+            <div><label>Away Lineup Size</label><input type='number' name='batting_order_a' value='{{s.batting_order_a}}' min='1' max='15'></div>
+            <div><label>Home Lineup Size</label><input type='number' name='batting_order_b' value='{{s.batting_order_b}}' min='1' max='15'></div>
           </div>
           <div style='margin-top:10px;'><button>Save Layout & Colors</button></div>
         </fieldset>
